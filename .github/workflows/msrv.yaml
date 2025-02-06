@@ -1,0 +1,22 @@
+name: Check minimum supported Rust version
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '59 1 * * 0' # at 01:59 on monday
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  msrv:
+    name: Check minimum supported Rust version
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo install cargo-msrv --all-features
+      - run: cargo msrv --output-format json verify -- cargo check
+      - if: ${{ failure() }}
+        run: cargo msrv --output-format json -- cargo check
