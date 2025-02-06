@@ -1,13 +1,17 @@
 # asqlite - Async SQLite wrapper for Rust
 
+[![Crates.io Version](https://img.shields.io/crates/v/asqlite)](https://crates.io/crates/asqlite)
+[![docs.rs](https://img.shields.io/docsrs/asqlite)](https://docs.rs/asqlite/latest/asqlite/)
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/nicbn/asqlite/build_and_test.yaml)](https://github.com/nicbn/asqlite/actions)
+
 This crate provides an API for accessing SQLite databases using
 async Rust.
 
 It wraps the `libsqlite3` library.
 
-See the official documentation.
+[Documentation](https://docs.rs/asqlite/latest/asqlite/)
 
-> :warning: **DISCLAIMER**: this crate is not associated with the mantainers or
+> ⚠️ **DISCLAIMER**: this crate is not associated with the mantainers or
   trademark owners of the official SQLite3 library.
 
 ## Example
