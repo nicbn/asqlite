@@ -5,7 +5,7 @@ use crate::{
     statement::PrepareWith,
     Blob, BlobOpenMode, Error, ErrorKind, Result, Statement,
 };
-use futures_lite::Stream;
+use futures_lite::{Stream, StreamExt};
 use std::{
     cmp::Ordering,
     ffi::CString,
@@ -309,10 +309,6 @@ impl Connection {
     ///
     /// Fails if there is more than one statement.
     ///
-    /// Execute a statement, returns the count of modified rows.
-    ///
-    /// Fails if there is more than one statement.
-    ///
     /// # Example
     ///
     /// ```
@@ -345,6 +341,39 @@ impl Connection {
         Rows {
             state: RowsState::Preparing(self.statement(statement), param_list),
         }
+    }
+
+    /// Execute a statement, returns only the first row of the result.
+    ///
+    /// Fails if there is more than one statement.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # tokio_test::block_on(async {
+    /// # let mut conn = asqlite::Connection::builder()
+    /// #    .write(true)
+    /// #    .create(true)
+    /// #    .open_memory(":memory")
+    /// #    .await?;
+    /// # conn.execute("CREATE TABLE user (user_id INT, secret TEXT)", ()).await?;
+    /// # conn.execute("INSERT INTO user (user_id, secret) VALUES (1, ':)')", ()).await?;
+    /// #
+    /// use futures::TryStreamExt;
+    ///
+    /// let secret: Option<String> = conn.query_first(
+    ///     "SELECT secret FROM user WHERE user_id = ?",
+    ///     asqlite::params!(1),
+    /// ).await?;
+    /// # asqlite::Result::<()>::Ok(())
+    /// # }).unwrap();
+    /// ```
+    pub async fn query_first<R: FromRow + Send + 'static>(
+        &mut self,
+        statement: impl IntoStatement,
+        param_list: impl Into<ParamList>,
+    ) -> Result<Option<R>> {
+        self.query(statement, param_list).try_next().await
     }
 
     /// Reset the connection busy handler.
