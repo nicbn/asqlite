@@ -1,3 +1,4 @@
+use super::SqlRef;
 use crate::{convert::Sql, ErrorKind, Result, ZeroBlob};
 use std::{rc::Rc, sync::Arc};
 
@@ -221,5 +222,33 @@ impl IntoSql for &'_ ZeroBlob {
     #[inline]
     fn into_sql(self) -> Result<Sql> {
         (*self).into_sql()
+    }
+}
+
+impl IntoSql for Sql {
+    #[inline]
+    fn into_sql(self) -> Result<Sql> {
+        Ok(self)
+    }
+}
+
+impl IntoSql for SqlRef<'_> {
+    #[inline]
+    fn into_sql(self) -> Result<Sql> {
+        Ok(self.into())
+    }
+}
+
+impl IntoSql for &'_ Sql {
+    #[inline]
+    fn into_sql(self) -> Result<Sql> {
+        Ok(self.clone())
+    }
+}
+
+impl IntoSql for &'_ SqlRef<'_> {
+    #[inline]
+    fn into_sql(self) -> Result<Sql> {
+        Ok((*self).into())
     }
 }
