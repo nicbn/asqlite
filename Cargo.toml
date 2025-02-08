@@ -1,6 +1,6 @@
 [package]
 name = "asqlite"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 rust-version = "1.72.0"
 resolver = "2"
@@ -18,13 +18,13 @@ bundled = ["libsqlite3-sys/bundled"]
 
 [dependencies]
 futures-lite = "2.6.0"
-libsqlite3-sys = "0.28.0"
+libsqlite3-sys = "0.31.0"
 oneshot = "0.1.9"
-rustc-hash = "1.1.0"
+rustc-hash = "2.1.1"
 
 [dev-dependencies]
 futures = "0.3.31"
-rusqlite = "0.31.0"
+rusqlite = "0.33.0"
 tokio = { version = "1.38.0", features = [
     "fs",
     "macros",
