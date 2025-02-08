@@ -55,13 +55,11 @@
 #[macro_export]
 macro_rules! params {
     ( $( $x1:expr $( => $x2:expr )? ),* $(,)? ) => {
-        $crate::convert::__private::new_param_list((move || {
-            Ok(Box::new([
-                $(
-                    $crate::__create_param!($x1 $( => $x2 )?),
-                )*
-            ]) as Box<[_]>)
-        })())
+        $crate::convert::__private::new_param_list([
+            $(
+                $crate::__create_param!($x1 $( => $x2 )?),
+            )*
+        ])
     };
 }
 
@@ -69,16 +67,16 @@ macro_rules! params {
 #[doc(hidden)]
 macro_rules! __create_param {
     ($name:expr => $param:expr) => {
-        $crate::convert::__private::Param {
+        $crate::convert::IntoSql::into_sql($param).map(|v| $crate::convert::__private::Param {
             name: Some($name),
-            param: $crate::convert::IntoSql::into_sql($param)?,
-        }
+            param: v,
+        })
     };
 
     ($param:expr) => {
-        $crate::convert::__private::Param {
+        $crate::convert::IntoSql::into_sql($param).map(|v| $crate::convert::__private::Param {
             name: None,
-            param: $crate::convert::IntoSql::into_sql($param)?,
-        }
+            param: v,
+        })
     };
 }

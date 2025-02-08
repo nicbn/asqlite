@@ -90,3 +90,22 @@ pub enum SqlRef<'a> {
     /// A null.
     Null,
 }
+
+impl From<SqlRef<'_>> for Sql {
+    fn from(value: SqlRef<'_>) -> Self {
+        match value {
+            SqlRef::Int(x) => Self::Int(x),
+            SqlRef::Float(x) => Self::Float(x),
+            SqlRef::Text(x) => Self::Text(x.to_string()),
+            SqlRef::Blob(x) => Self::Blob(x.to_owned()),
+            SqlRef::ZeroBlob(x) => Self::ZeroBlob(x),
+            SqlRef::Null => Self::Null,
+        }
+    }
+}
+
+impl<'a> From<&'a Sql> for SqlRef<'a> {
+    fn from(value: &'a Sql) -> Self {
+        value.borrow()
+    }
+}

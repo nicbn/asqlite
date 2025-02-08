@@ -1,5 +1,6 @@
+use super::Sql;
 use crate::{convert::SqlRef, ErrorKind, Result};
-use std::{str, iter, sync::Arc};
+use std::{iter, str, sync::Arc};
 
 /// Convert SQLite values into Rust types.
 ///
@@ -14,10 +15,10 @@ use std::{str, iter, sync::Arc};
 ///
 /// If `T` can be used as [`FromSql`], so can [`Option<T>`]. In this case,
 /// `None` is returned if the type is `NULL`.
-/// 
+///
 /// The following are the types where no automatic conversion happens, with
 /// the exception of expected integer and floating point casts.
-/// 
+///
 /// | SQL type      | Rust type(s)                              | Infallible |
 /// |---------------|-------------------------------------------|------------|
 /// | `INTEGER`     | `bool, i64, i128`                         | Yes        |
@@ -25,9 +26,9 @@ use std::{str, iter, sync::Arc};
 /// | `REAL`        | `f64, f32`                                | Yes        |
 /// | `BLOB`        | `Vec<u8>`                                 | Yes        |
 /// | `TEXT`\*      | `String`                                  | Yes        |
-/// 
+///
 /// \* If the text is invalid UTF-8, the library treats as if it was a blob.
-/// 
+///
 /// # Automatic conversions
 ///
 /// For `INTEGER` SQLite type:
@@ -259,3 +260,9 @@ macro_rules! impl_text {
 impl_text!(String);
 impl_text!(Box<str>);
 impl_text!(Arc<str>);
+
+impl FromSql for Sql {
+    fn from_sql(x: SqlRef) -> Result<Self> {
+        Ok(x.into())
+    }
+}

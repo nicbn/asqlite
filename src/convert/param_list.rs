@@ -12,8 +12,10 @@ pub mod __private {
     }
 
     #[inline]
-    pub fn new_param_list(items: Result<Box<[Param]>>) -> ParamList {
-        ParamList { items }
+    pub fn new_param_list<const N: usize>(items: [Result<Param>; N]) -> ParamList {
+        ParamList {
+            items: items.into_iter().collect(),
+        }
     }
 }
 
