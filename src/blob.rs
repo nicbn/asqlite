@@ -20,7 +20,7 @@ const BUFFER_CAPACITY: usize = 1024;
 /// Can be used to read and write to a blob. Reads and writes are buffered.
 ///
 /// Created by [`Connection::open_blob`].
-/// 
+///
 /// # Example
 ///
 /// ```
@@ -33,7 +33,7 @@ const BUFFER_CAPACITY: usize = 1024;
 /// #    .await?;
 /// # conn.execute("CREATE TABLE my_table (column BLOB);", ()).await?;
 /// use futures::AsyncWriteExt;
-/// 
+///
 /// let id = conn.insert("INSERT INTO my_table (column) VALUES (?);",
 ///     asqlite::params!(asqlite::ZeroBlob(4096))).await?;
 /// let mut blob = conn.open_blob(
@@ -48,7 +48,7 @@ const BUFFER_CAPACITY: usize = 1024;
 /// # io::Result::<()>::Ok(())
 /// # }).unwrap();
 /// ```
-/// 
+///
 /// [`Connection::open_blob`]: crate::Connection::open_blob
 pub struct Blob {
     tx_req: Sender,
@@ -302,7 +302,7 @@ impl Blob {
                     }
                 }
 
-                None => {
+                None if self.offset < self.len => {
                     let (tx, rx) = oneshot::channel();
 
                     let mut buf = mem::take(&mut self.buf);
@@ -320,6 +320,8 @@ impl Blob {
                         rx,
                     });
                 }
+
+                None => return Poll::Ready(Ok(())),
             }
         }
     }
