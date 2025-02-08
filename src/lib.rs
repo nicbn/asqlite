@@ -11,7 +11,11 @@
 //!
 //! ```toml
 //! [dependencies]
-//! asqlite = { version = "1.0.0", features = [ "bundled" ] }
+#![doc = concat!(
+    r#"asqlite = { version = ""#,
+    env!("CARGO_PKG_VERSION"),
+    r#"", features = [ "bundled" ] }"#,
+)]
 //! ```
 //!
 //! Unless you are writing a library, you probably want to enable the `bundled`
