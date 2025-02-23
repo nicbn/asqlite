@@ -51,7 +51,7 @@ while let Some(row) = rows.next().await {
 
 ## Minimum Supported Rust Version
 
-Currently the Minimum Supported Rust Version (MSRV) is 1.72. This version may
+Currently the Minimum Supported Rust Version (MSRV) is 1.82. This version may
 be increased in the future with a minor release bump.
 
 ## License
