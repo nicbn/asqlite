@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 pub(super) struct VecArena<T> {
     free: usize,
     data: Vec<ValueOrFreeList<T>>,
@@ -40,6 +43,15 @@ impl<T> VecArena<T> {
             *data = ValueOrFreeList::FreeList(self.free);
 
             self.free = index;
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn get(&self, index: usize) -> Option<&T> {
+        if let ValueOrFreeList::Value(x) = self.data.get(index)? {
+            Some(x)
+        } else {
+            None
         }
     }
 
