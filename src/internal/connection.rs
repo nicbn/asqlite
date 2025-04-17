@@ -234,7 +234,11 @@ impl Connection {
                 Some(api_callback_drop),
             )
         } {
-            libsqlite3_sys::SQLITE_OK => Ok(()),
+            libsqlite3_sys::SQLITE_OK => {
+                Box::leak(f);
+
+                Ok(())
+            }
             _ => Err(self.last_error()),
         }
     }
