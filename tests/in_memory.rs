@@ -1,5 +1,5 @@
 use asqlite::params;
-use futures_lite::StreamExt;
+use futures::StreamExt;
 
 #[tokio::test]
 async fn query() {
@@ -66,6 +66,40 @@ async fn update() {
         .unwrap()
         .unwrap();
     assert_eq!(value, 2);
+
+    conn.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn collation() {
+    let mut conn = asqlite::Connection::builder()
+        .write(true)
+        .create(true)
+        .open_memory(":memory")
+        .await
+        .unwrap();
+
+    conn.create_collation("test", |a, b| a.cmp(b))
+        .await
+        .unwrap();
+
+    conn.create_collation("test2", |a, b| a.cmp(b).reverse())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        conn.query_first("SELECT 'b' > 'a' COLLATE test", ())
+            .await
+            .unwrap(),
+        Some(true),
+    );
+
+    assert_eq!(
+        conn.query_first("SELECT 'a' > 'b' COLLATE test2", ())
+            .await
+            .unwrap(),
+        Some(true),
+    );
 
     conn.close().await.unwrap();
 }
