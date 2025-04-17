@@ -1,5 +1,6 @@
 use asqlite::params;
 use futures_lite::StreamExt;
+use std::sync::{atomic::AtomicBool, Arc};
 use std::{
     env::temp_dir,
     future::Future,
@@ -110,6 +111,55 @@ async fn update_file() {
         assert_eq!(value, 2);
 
         conn.close().await.unwrap();
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn busy_handler() {
+    with_tmp_file(|file| async move {
+        let busy = Arc::new(AtomicBool::new(false));
+
+        let mut conn1 = asqlite::Connection::builder()
+            .write(true)
+            .create(true)
+            .open(&file)
+            .await
+            .unwrap();
+
+        let mut conn2 = asqlite::Connection::builder()
+            .write(true)
+            .create(false)
+            .open(file)
+            .await
+            .unwrap();
+
+        {
+            let busy = busy.clone();
+
+            conn2
+                .set_busy_handler(move |_| {
+                    busy.store(true, Ordering::SeqCst);
+                    false
+                })
+                .unwrap();
+        }
+
+        conn1.execute("BEGIN EXCLUSIVE", ()).await.unwrap();
+
+        assert_eq!(
+            conn2
+                .execute("BEGIN EXCLUSIVE", ())
+                .await
+                .unwrap_err()
+                .kind(),
+            asqlite::ErrorKind::DatabaseBusy
+        );
+
+        assert!(busy.load(Ordering::SeqCst));
+
+        conn1.close().await.unwrap();
+        conn2.close().await.unwrap();
     })
     .await;
 }
