@@ -42,7 +42,7 @@ impl Statement {
         let mut position = 1;
         let mut param_binder = ParamBinder::new(self);
         for param in self.params.as_ref().unwrap().iter() {
-            match param.name {
+            match &param.name {
                 Some(name) => unsafe { param_binder.bind_named(name, param.param.borrow())? },
                 None => unsafe { param_binder.bind(position, param.param.borrow())? },
             }

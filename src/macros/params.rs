@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 /// Creates a parameter list.
 ///
 /// This can be used for either positional parameters, named parameters, or
@@ -54,29 +57,37 @@
 /// ```
 #[macro_export]
 macro_rules! params {
-    ( $( $x1:expr $( => $x2:expr )? ),* $(,)? ) => {
-        $crate::convert::__private::new_param_list([
-            $(
-                $crate::__create_param!($x1 $( => $x2 )?),
-            )*
-        ])
-    };
+    ( $( $x1:expr $( => $x2:expr )? ),* $(,)? ) => {{
+        let builder = $crate::convert::ParamList::builder($crate::__len!($($x1),*));
+        $( let builder = $crate::__create_param!(builder, $x1 $( => $x2 )?); )*
+        builder.build()
+    }};
 }
 
 #[macro_export]
 #[doc(hidden)]
 macro_rules! __create_param {
-    ($name:expr => $param:expr) => {
-        $crate::convert::IntoSql::into_sql($param).map(|v| $crate::convert::__private::Param {
-            name: Some($name),
-            param: v,
-        })
+    ($b:expr, $name:expr => $param:expr) => {
+        $b.named_param($name, $param)
     };
 
-    ($param:expr) => {
-        $crate::convert::IntoSql::into_sql($param).map(|v| $crate::convert::__private::Param {
-            name: None,
-            param: v,
-        })
+    ($b:expr, $param:expr) => {
+        $b.param($param)
+    };
+}
+
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __len {
+    ($h:expr, $($r:expr),*) => {
+        1 + $crate::__len!($($r),*)
+    };
+
+    ($h:expr) => {
+        1
+    };
+
+    () => {
+        0
     };
 }
