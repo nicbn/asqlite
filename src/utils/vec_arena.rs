@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests;
 
-pub(super) struct VecArena<T> {
+pub(crate) struct VecArena<T> {
     free: usize,
     data: Vec<ValueOrFreeList<T>>,
 }
