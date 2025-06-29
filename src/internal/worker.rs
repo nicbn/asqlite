@@ -1,7 +1,6 @@
-use super::{blob::Blob, vec_arena::VecArena, Connection, ConnectionHandle, Statement, Step};
+use super::{blob::Blob, Connection, ConnectionHandle, Statement, Step};
 use crate::{
-    convert::{ParamList, RowReader},
-    Error, ErrorKind, Result,
+    convert::{ParamList, RowReader}, utils::vec_arena::VecArena, Error, ErrorKind, Result
 };
 use std::{
     cmp::Ordering,

@@ -53,6 +53,7 @@ pub mod convert;
 mod error;
 mod internal;
 mod statement;
+mod utils;
 
 pub use self::{
     blob::Blob,
