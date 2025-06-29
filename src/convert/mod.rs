@@ -35,7 +35,7 @@ use crate::ZeroBlob;
 pub use self::{from_row::*, from_sql::*, into_sql::*, param_list::*, statement::*};
 
 /// A SQLite value.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub enum Sql {
     /// An integer.
     Int(i64),
@@ -52,6 +52,7 @@ pub enum Sql {
     /// This is never returned by SQL queries.
     ZeroBlob(ZeroBlob),
     /// A null.
+    #[default]
     Null,
 }
 
