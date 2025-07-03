@@ -72,7 +72,7 @@ impl Sql {
 }
 
 /// A borrowed SQLite value.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum SqlRef<'a> {
     /// An integer.
     Int(i64),
@@ -89,6 +89,7 @@ pub enum SqlRef<'a> {
     /// This is never returned by SQL queries.
     ZeroBlob(ZeroBlob),
     /// A null.
+    #[default]
     Null,
 }
 
