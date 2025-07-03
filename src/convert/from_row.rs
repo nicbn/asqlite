@@ -1,5 +1,5 @@
 use super::{FromSql, SqlRef};
-use crate::{Error, ErrorKind, Result};
+use crate::{convert::Sql, Error, ErrorKind, Result};
 use core::str;
 use std::{ffi::c_int, fmt, slice};
 
@@ -9,6 +9,23 @@ use std::{ffi::c_int, fmt, slice};
 pub trait FromRow: Sized {
     /// Converts into a Rust tuple, by reading from a [`RowReader`].
     fn from_row(row: &mut RowReader) -> Result<Self>;
+}
+
+impl FromRow for Vec<Sql> {
+    fn from_row(row: &mut RowReader) -> Result<Self> {
+        let size = row.len();
+        (0..size).map(|_| Ok(row.read()?.into())).collect()
+    }
+}
+
+impl<const N: usize> FromRow for [Sql; N] {
+    fn from_row(row: &mut RowReader) -> Result<Self> {
+        let mut res = [const { Sql::Null }; N];
+        for v in res.iter_mut() {
+            *v = row.read()?.into();
+        }
+        Ok(res)
+    }
 }
 
 macro_rules! impl_tuple {
@@ -128,5 +145,19 @@ impl<'a> RowReader<'a> {
                 "invalid data type".to_string(),
             )),
         }
+    }
+
+    /// Amount of rows.
+    pub fn len(&self) -> usize {
+        unsafe {
+            libsqlite3_sys::sqlite3_column_count(self.statement.handle())
+                .try_into()
+                .unwrap_or(0)
+        }
+    }
+
+    /// Whether is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
