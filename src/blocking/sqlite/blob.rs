@@ -1,17 +1,15 @@
-use crate::{ErrorKind, Result};
-
-use super::Connection;
-use std::{ffi::c_void, ptr::NonNull};
+use crate::{blocking::sqlite::ConnectionHandle, ErrorKind, Result};
+use std::{ffi::c_void, ptr::NonNull, sync::Arc};
 
 pub(crate) struct Blob {
     handle: NonNull<libsqlite3_sys::sqlite3_blob>,
-    connection: Connection,
+    connection: Arc<ConnectionHandle>,
 }
 
 impl Blob {
     pub(super) unsafe fn from(
         handle: NonNull<libsqlite3_sys::sqlite3_blob>,
-        connection: Connection,
+        connection: Arc<ConnectionHandle>,
     ) -> Self {
         Self { handle, connection }
     }

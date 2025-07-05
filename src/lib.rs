@@ -48,12 +48,13 @@
 #[macro_use]
 mod macros;
 mod blob;
+mod blocking;
 mod connection;
 pub mod convert;
 mod error;
-mod internal;
 mod statement;
 mod utils;
+mod worker;
 
 pub use self::{
     blob::Blob,

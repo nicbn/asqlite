@@ -1,8 +1,9 @@
 use self::statement_cache::StatementCache;
 use crate::{
+    blocking::{self, sqlite::ConnectionFactory},
     convert::{FromRow, IntoStatement, ParamList, __StrOrStatement},
-    internal::{worker, RequestMessage, Sender},
     statement::PrepareWith,
+    worker::{worker, Sender},
     Blob, BlobOpenMode, Error, ErrorKind, Result, Statement,
 };
 use futures_lite::{Stream, StreamExt};
@@ -41,7 +42,7 @@ pub use self::builder::*;
 /// ```
 pub struct Connection {
     pub(crate) tx_req: Sender,
-    connection_handle: Weak<crate::internal::ConnectionHandle>,
+    interrupt_handle: Weak<dyn blocking::InterruptHandle>,
 
     cache: StatementCache,
 }
@@ -55,7 +56,7 @@ impl fmt::Debug for Connection {
 impl Connection {
     #[inline]
     async fn open(path: String, flags: i32, cache_capacity: usize) -> Result<Self> {
-        let tx_req = worker();
+        let tx_req = worker(ConnectionFactory);
 
         let path = CString::new(path).map_err(|_| {
             Error::new(
@@ -63,15 +64,10 @@ impl Connection {
                 "path cannot contain nul characters".to_string(),
             )
         })?;
-        let (tx, rx) = oneshot::channel();
-        tx_req
-            .send(RequestMessage::Open { path, flags, tx })
-            .map_err(|_| Error::background_task_failed())?;
-        let connection_handle = rx.await.map_err(|_| Error::background_task_failed())?;
-
+        let interrupt_handle = tx_req.open(path, flags).await?;
         Ok(Self {
             tx_req,
-            connection_handle: connection_handle?,
+            interrupt_handle,
 
             cache: StatementCache::new(cache_capacity),
         })
@@ -100,18 +96,13 @@ impl Connection {
     /// Get copy of the interrupt handle.
     pub fn interrupt_handle(&self) -> InterruptHandle {
         InterruptHandle {
-            connection_handle: self.connection_handle.clone(),
+            interrupt_handle: self.interrupt_handle.clone(),
         }
     }
 
     /// Close the connection.
     pub async fn close(self) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.tx_req
-            .send(RequestMessage::Close { tx: Some(tx) })
-            .map_err(|_| Error::background_task_failed())?;
-        rx.await.map_err(|_| Error::background_task_failed())?;
-        Ok(())
+        self.tx_req.close().await
     }
 
     /// Prepare a statement.
@@ -378,7 +369,10 @@ impl Connection {
 
     /// Reset the connection busy handler.
     pub fn reset_busy_handler(&mut self) -> Result<()> {
-        self.tx_req.send(RequestMessage::ResetBusyHandler)
+        self.tx_req.call_without_return_value(move |c| {
+            let _ = c.reset_busy_handler();
+        });
+        Ok(())
     }
 
     /// Set the connection busy handler.
@@ -389,16 +383,18 @@ impl Connection {
     /// If returns true, another attempt is made to access the database.
     /// Otherwise [`DatabaseBusy`](ErrorKind::DatabaseBusy) is returned.
     pub fn set_busy_handler(&mut self, f: impl FnMut(u32) -> bool + Send + 'static) -> Result<()> {
-        self.tx_req.send(RequestMessage::SetBusyHandler {
-            handler: Box::new(f),
-        })
+        self.tx_req.call_without_return_value(move |c| {
+            let _ = unsafe { c.set_busy_handler(Box::new(f)) };
+        });
+        Ok(())
     }
 
     /// Set the connection busy timeout.
     pub fn set_busy_timeout(&mut self, busy_timeout: Duration) -> Result<()> {
-        self.tx_req.send(RequestMessage::SetBusyTimeout {
-            duration: busy_timeout,
-        })
+        self.tx_req.call_without_return_value(move |c| {
+            let _ = c.set_busy_timeout(busy_timeout);
+        });
+        Ok(())
     }
 
     /// Create a collation.
@@ -413,22 +409,14 @@ impl Connection {
                 "collation name must not contain nul".to_string(),
             )
         })?;
-        let (tx, rx) = oneshot::channel();
-        self.tx_req.send(RequestMessage::CreateCollation {
-            name,
-            callback: Box::new(f),
-            tx,
-        })?;
-        rx.await.map_err(|_| Error::background_task_failed())??;
-        Ok(())
+        self.tx_req
+            .call(move |c| c.create_collation(&name, Box::new(f)))
+            .await
     }
 
     /// Flush the disk cache.
     pub async fn flush_disk_cache(&mut self) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.tx_req.send(RequestMessage::FlushDiskCache { tx })?;
-        rx.await.map_err(|_| Error::background_task_failed())??;
-        Ok(())
+        self.tx_req.call(|c| c.flush_cache()).await
     }
 
     /// Open a binary blob.
@@ -480,14 +468,14 @@ impl Connection {
 impl Drop for Connection {
     fn drop(&mut self) {
         self.cache.clear();
-        let _ = self.tx_req.send(RequestMessage::Close { tx: None });
+        self.tx_req.close_drop();
     }
 }
 
 /// Interrupt handle for a connection.
 #[derive(Clone)]
 pub struct InterruptHandle {
-    connection_handle: Weak<crate::internal::ConnectionHandle>,
+    interrupt_handle: Weak<dyn blocking::InterruptHandle>,
 }
 
 impl fmt::Debug for InterruptHandle {
@@ -501,8 +489,8 @@ impl InterruptHandle {
     ///
     /// Interrupting an operation is inherently prone to race conditions.
     pub fn interrupt(&self) {
-        if let Some(connection_handle) = self.connection_handle.upgrade() {
-            connection_handle.interrupt();
+        if let Some(interrupt_handle) = self.interrupt_handle.upgrade() {
+            interrupt_handle.interrupt();
         }
     }
 }

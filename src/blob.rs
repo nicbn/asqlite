@@ -1,5 +1,6 @@
 use crate::{
-    internal::{BlobIndex, RequestMessage, Sender},
+    blocking::BlobIndex,
+    worker::{Sender, Work},
     Error, ErrorKind, Result,
 };
 use futures_lite::{AsyncBufRead, AsyncRead, AsyncSeek, AsyncWrite};
@@ -80,14 +81,14 @@ enum BlobOperation {
     Reading {
         /// Offset of the buffer.
         offset: u64,
-        /// Receiver.
-        rx: oneshot::Receiver<(Vec<u8>, Result<()>)>,
+        /// Work.
+        work: Work<(Vec<u8>, Result<()>)>,
     },
 
     /// Currently writing to the database.
     Writing {
-        /// Receiver.
-        rx: oneshot::Receiver<(Vec<u8>, Result<()>)>,
+        /// Work.
+        work: Work<(Vec<u8>, Result<()>)>,
     },
 }
 
@@ -118,16 +119,12 @@ impl Blob {
                 "column name cannot contain nul characters".to_string(),
             )
         })?;
-        let (tx, rx) = oneshot::channel();
-        tx_req.send(RequestMessage::OpenBlob {
-            database,
-            table,
-            column,
-            row,
-            flags,
-            tx,
-        })?;
-        let (len, index) = rx.await.map_err(|_| ErrorKind::ConnectionClosed)??;
+        let (len, index) = tx_req
+            .call(move |c| {
+                let b = c.open_blob(&database, &table, &column, row, flags)?;
+                Ok((c.blob_size(b)?, b))
+            })
+            .await?;
         Ok(Self {
             tx_req,
             index,
@@ -211,21 +208,20 @@ impl Blob {
                         return Poll::Ready(Ok(()));
                     }
 
-                    let (tx, rx) = oneshot::channel();
-
                     let buf = mem::take(&mut self.buf);
-                    self.tx_req.send(RequestMessage::Write {
-                        index: self.index,
-                        offset: *offset,
-                        chunk: buf,
-                        tx,
-                    })?;
-                    self.operation = Some(BlobOperation::Writing { rx });
+                    let index = self.index;
+                    let offset = *offset;
+                    self.operation = Some(BlobOperation::Writing {
+                        work: self.tx_req.call(move |c| {
+                            let r = c.write_blob(index, &buf, offset);
+                            Ok((buf, r))
+                        }),
+                    });
                 }
 
                 Some(BlobOperation::Reading { .. }) => return Poll::Ready(Ok(())),
 
-                Some(BlobOperation::Writing { rx }) => match ready!(Pin::new(rx).poll(cx)) {
+                Some(BlobOperation::Writing { work }) => match ready!(Pin::new(work).poll(cx)) {
                     Ok((b, v)) => {
                         self.buf = b;
 
@@ -233,10 +229,10 @@ impl Blob {
 
                         return Poll::Ready(v);
                     }
-                    Err(_) => {
+                    Err(e) => {
                         self.operation = None;
 
-                        return Poll::Ready(Err(Error::background_task_failed()));
+                        return Poll::Ready(Err(e));
                     }
                 },
 
@@ -275,8 +271,8 @@ impl Blob {
                     self.operation = None;
                 }
 
-                Some(BlobOperation::Reading { offset, rx }) => {
-                    match ready!(Pin::new(rx).poll(cx)) {
+                Some(BlobOperation::Reading { offset, work }) => {
+                    match ready!(Pin::new(work).poll(cx)) {
                         Ok((b, Ok(()))) => {
                             self.buf = b;
 
@@ -294,30 +290,27 @@ impl Blob {
 
                             return Poll::Ready(Err(error));
                         }
-                        Err(_) => {
+                        Err(e) => {
                             self.operation = None;
 
-                            return Poll::Ready(Err(Error::background_task_failed()));
+                            return Poll::Ready(Err(e));
                         }
                     }
                 }
 
                 None if self.offset < self.len => {
-                    let (tx, rx) = oneshot::channel();
-
                     let mut buf = mem::take(&mut self.buf);
+                    let index = self.index;
+                    let len = BUFFER_CAPACITY
+                        .min((self.len - self.offset).try_into().unwrap_or(usize::MAX));
+                    let offset = self.offset;
                     buf.clear();
-                    self.tx_req.send(RequestMessage::Read {
-                        index: self.index,
-                        len: BUFFER_CAPACITY
-                            .min((self.len - self.offset).try_into().unwrap_or(usize::MAX)),
-                        chunk: buf,
-                        offset: self.offset,
-                        tx,
-                    })?;
                     self.operation = Some(BlobOperation::Reading {
                         offset: self.offset,
-                        rx,
+                        work: self.tx_req.call(move |c| {
+                            let r = c.read_blob(index, &mut buf, offset, len);
+                            Ok((buf, r))
+                        }),
                     });
                 }
 
@@ -391,14 +384,9 @@ impl Blob {
     /// Move the blob to another row, reopening the blob at the selected row.
     pub async fn reopen(&mut self, row: i64) -> Result<()> {
         self.flush().await?;
+        let index = self.index;
         self.operation = None;
-        let (tx, rx) = oneshot::channel();
-        self.tx_req.send(RequestMessage::Reopen {
-            index: self.index,
-            row,
-            tx,
-        })?;
-        rx.await.map_err(|_| Error::background_task_failed())?
+        self.tx_req.call(move |c| c.reopen_blob(index, row)).await
     }
 }
 
@@ -413,19 +401,18 @@ impl fmt::Debug for Blob {
 impl Drop for Blob {
     fn drop(&mut self) {
         if let Some(BlobOperation::WritingToBuffer { offset }) = self.operation.as_ref() {
-            let (tx, _) = oneshot::channel();
             let buf = mem::take(&mut self.buf);
-            let _ = self.tx_req.send(RequestMessage::Write {
-                index: self.index,
-                offset: *offset,
-                chunk: buf,
-                tx,
+            let offset = *offset;
+            let index = self.index;
+            self.tx_req.call_without_return_value(move |c| {
+                let _ = c.write_blob(index, &buf, offset);
             });
         }
 
-        let _ = self
-            .tx_req
-            .send(RequestMessage::CloseBlob { index: self.index });
+        let index = self.index;
+        self.tx_req.call_without_return_value(move |c| {
+            c.close_blob(index);
+        });
     }
 }
 
