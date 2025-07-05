@@ -6,7 +6,7 @@ use crate::{
     worker::{worker, Sender},
     Blob, BlobOpenMode, Error, ErrorKind, Result, Statement,
 };
-use futures_lite::{Stream, StreamExt};
+use futures_core::Stream;
 use std::{
     cmp::Ordering,
     ffi::CString,
@@ -29,7 +29,7 @@ pub use self::builder::*;
 /// # Example
 ///
 /// ```
-/// # tokio_test::block_on(async {
+/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
 /// let mut conn = asqlite::Connection::builder()
 ///     .write(true)
 ///     .create(true)
@@ -80,7 +80,7 @@ impl Connection {
     /// # Example
     ///
     /// ```
-    /// # tokio_test::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// let conn = asqlite::Connection::builder()
     ///     .write(true)
     ///     .create(true)
@@ -120,7 +120,7 @@ impl Connection {
     /// # Example
     ///
     /// ```
-    /// # tokio_test::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// # let mut conn = asqlite::Connection::builder()
     /// #    .write(true)
     /// #    .create(true)
@@ -181,7 +181,7 @@ impl Connection {
     /// # Example
     ///
     /// ```
-    /// # tokio_test::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// # let mut conn = asqlite::Connection::builder()
     /// #    .write(true)
     /// #    .create(true)
@@ -214,7 +214,7 @@ impl Connection {
     /// # Example
     ///
     /// ```
-    /// # tokio_test::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// # let mut conn = asqlite::Connection::builder()
     /// #    .write(true)
     /// #    .create(true)
@@ -240,7 +240,7 @@ impl Connection {
     /// # Example
     ///
     /// ```
-    /// # tokio_test::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// # let mut conn = asqlite::Connection::builder()
     /// #    .write(true)
     /// #    .create(true)
@@ -272,7 +272,7 @@ impl Connection {
     /// # Example
     ///
     /// ```
-    /// # tokio_test::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// # let mut conn = asqlite::Connection::builder()
     /// #    .write(true)
     /// #    .create(true)
@@ -303,7 +303,7 @@ impl Connection {
     /// # Example
     ///
     /// ```
-    /// # tokio_test::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// # let mut conn = asqlite::Connection::builder()
     /// #    .write(true)
     /// #    .create(true)
@@ -341,7 +341,7 @@ impl Connection {
     /// # Example
     ///
     /// ```
-    /// # tokio_test::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// # let mut conn = asqlite::Connection::builder()
     /// #    .write(true)
     /// #    .create(true)
@@ -364,7 +364,8 @@ impl Connection {
         statement: impl IntoStatement,
         param_list: impl Into<ParamList>,
     ) -> Result<Option<R>> {
-        self.query(statement, param_list).try_next().await
+        let mut v = self.query(statement, param_list);
+        future::poll_fn(move |cx| Pin::new(&mut v).poll_next(cx).map(|v| v.transpose())).await
     }
 
     /// Reset the connection busy handler.
@@ -426,7 +427,7 @@ impl Connection {
     /// # Example
     ///
     /// ```
-    /// # tokio_test::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// # let mut conn = asqlite::Connection::builder()
     /// #    .write(true)
     /// #    .create(true)

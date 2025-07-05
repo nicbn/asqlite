@@ -3,7 +3,7 @@ use crate::{
     worker::{Sender, Work},
     Error, ErrorKind, Result,
 };
-use futures_lite::{AsyncBufRead, AsyncRead, AsyncSeek, AsyncWrite};
+use futures_io::{AsyncBufRead, AsyncRead, AsyncSeek, AsyncWrite};
 use std::{
     ffi::CString,
     fmt,
@@ -26,7 +26,7 @@ const BUFFER_CAPACITY: usize = 1024;
 ///
 /// ```
 /// # use std::io;
-/// # tokio_test::block_on(async {
+/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
 /// # let mut conn = asqlite::Connection::builder()
 /// #    .write(true)
 /// #    .create(true)

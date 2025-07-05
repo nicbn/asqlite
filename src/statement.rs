@@ -4,7 +4,7 @@ use crate::{
     worker::{Sender, Work},
     Error, ErrorKind, Result,
 };
-use futures_lite::Stream;
+use futures_core::Stream;
 use std::{
     fmt,
     future::Future,
