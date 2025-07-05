@@ -13,11 +13,11 @@ pub struct ConnectionBuilder {
 
 impl ConnectionBuilder {
     /// Create a new connection builder.
-    /// 
+    ///
     /// # Example
     ///
     /// ```
-    /// # tokio_test::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// let conn = asqlite::ConnectionBuilder::new()
     ///     .write(true)
     ///     .create(true)
@@ -41,11 +41,11 @@ impl ConnectionBuilder {
     /// If `false`, database is opened in read-only mode.
     ///
     /// By default, `false`.
-    /// 
+    ///
     /// # Example
     ///
     /// ```
-    /// # tokio_test::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// let conn = asqlite::ConnectionBuilder::new()
     ///     .write(true)
     ///     .open_memory(":memory")
@@ -64,11 +64,11 @@ impl ConnectionBuilder {
     /// Does not do anything unless [`write`](Self::write) is also `true`.
     ///
     /// By default, `false`.
-    /// 
+    ///
     /// # Example
     ///
     /// ```
-    /// # tokio_test::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// let conn = asqlite::ConnectionBuilder::new()
     ///     .write(true)
     ///     .create(true)
@@ -87,11 +87,11 @@ impl ConnectionBuilder {
     /// discouraged by SQLite3 docs.
     ///
     /// By default, `false`.
-    /// 
+    ///
     /// # Example
     ///
     /// ```
-    /// # tokio_test::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// let conn = asqlite::ConnectionBuilder::new()
     ///     .shared_cache(true)
     ///     .open_memory(":memory")
@@ -108,11 +108,11 @@ impl ConnectionBuilder {
     /// Set the statement cache capacity.
     ///
     /// By default, `8`.
-    /// 
+    ///
     /// # Example
     ///
     /// ```
-    /// # tokio_test::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// let conn = asqlite::ConnectionBuilder::new()
     ///     .statement_cache_capacity(1024)
     ///     .open_memory(":memory")
@@ -133,7 +133,7 @@ impl ConnectionBuilder {
     /// # Example
     ///
     /// ```no_run
-    /// # tokio_test::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// let conn = asqlite::ConnectionBuilder::new()
     ///     .open("/path/FileOfMyDatabase.sqlite3")
     ///     .await?;
@@ -155,11 +155,11 @@ impl ConnectionBuilder {
     }
 
     /// Open a database from a URI.
-    /// 
+    ///
     /// # Example
     ///
     /// ```no_run
-    /// # tokio_test::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// let conn = asqlite::ConnectionBuilder::new()
     ///     .open_uri("file:/path/FileOfMyDatabase.sqlite3")
     ///     .await?;
@@ -186,11 +186,11 @@ impl ConnectionBuilder {
     }
 
     /// Open a database from memory.
-    /// 
+    ///
     /// # Example
     ///
     /// ```
-    /// # tokio_test::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// let conn = asqlite::ConnectionBuilder::new()
     ///     .open_memory(":memory")
     ///     .await?;

@@ -1,5 +1,5 @@
 use asqlite::params;
-use futures_lite::StreamExt;
+use futures::StreamExt;
 use std::sync::{atomic::AtomicBool, Arc};
 use std::{
     env::temp_dir,
