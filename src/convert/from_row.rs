@@ -1,7 +1,6 @@
 use super::{FromSql, SqlRef};
-use crate::{convert::Sql, Error, ErrorKind, Result};
-use core::str;
-use std::{ffi::c_int, fmt, slice};
+use crate::{convert::Sql, Result};
+use std::fmt;
 
 /// Convert SQLite rows into Rust tuples.
 ///
@@ -71,9 +70,9 @@ impl_tuple!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15);
 impl_tuple!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16);
 
 /// Type for reading rows.
+#[repr(transparent)]
 pub struct RowReader<'a> {
-    statement: &'a crate::internal::Statement,
-    next: c_int,
+    iterator: dyn ExactSizeIterator<Item = Result<SqlRef<'a>>>,
 }
 
 impl fmt::Debug for RowReader<'_> {
@@ -83,77 +82,22 @@ impl fmt::Debug for RowReader<'_> {
 }
 
 impl<'a> RowReader<'a> {
-    pub(crate) fn new(statement: &'a crate::internal::Statement) -> Self {
-        Self { statement, next: 0 }
+    pub(crate) fn new<'b>(
+        iterator: &'b mut dyn ExactSizeIterator<Item = Result<SqlRef<'a>>>,
+    ) -> &'b mut Self {
+        unsafe {
+            &mut *(iterator as *mut dyn ExactSizeIterator<Item = Result<SqlRef<'a>>> as *mut Self)
+        }
     }
 
-    /// Read a row.
+    /// Read a column.
     pub fn read(&mut self) -> Result<SqlRef> {
-        let index = self.next;
-        self.next += 1;
-
-        match unsafe { libsqlite3_sys::sqlite3_column_type(self.statement.handle(), index) } {
-            libsqlite3_sys::SQLITE_INTEGER => {
-                let value =
-                    unsafe { libsqlite3_sys::sqlite3_column_int64(self.statement.handle(), index) };
-                Ok(SqlRef::Int(value))
-            }
-            libsqlite3_sys::SQLITE_FLOAT => {
-                let value = unsafe {
-                    libsqlite3_sys::sqlite3_column_double(self.statement.handle(), index)
-                };
-                Ok(SqlRef::Float(value))
-            }
-            libsqlite3_sys::SQLITE_TEXT => {
-                let ptr =
-                    unsafe { libsqlite3_sys::sqlite3_column_text(self.statement.handle(), index) };
-
-                if ptr.is_null() {
-                    return Ok(SqlRef::Text(""));
-                }
-
-                let size =
-                    unsafe { libsqlite3_sys::sqlite3_column_bytes(self.statement.handle(), index) };
-                let size = size.try_into().map_err(|_| ErrorKind::OutOfRange)?;
-
-                let slice = unsafe { slice::from_raw_parts(ptr, size) };
-
-                // If the text is not actually UTF-8, pretend it is a blob
-                if let Ok(x) = str::from_utf8(slice) {
-                    Ok(SqlRef::Text(x))
-                } else {
-                    Ok(SqlRef::Blob(slice))
-                }
-            }
-            libsqlite3_sys::SQLITE_BLOB => {
-                let ptr =
-                    unsafe { libsqlite3_sys::sqlite3_column_text(self.statement.handle(), index) };
-
-                if ptr.is_null() {
-                    return Ok(SqlRef::Blob(&[]));
-                }
-
-                let size =
-                    unsafe { libsqlite3_sys::sqlite3_column_bytes(self.statement.handle(), index) };
-                let size = size.try_into().map_err(|_| ErrorKind::OutOfRange)?;
-
-                Ok(SqlRef::Blob(unsafe { slice::from_raw_parts(ptr, size) }))
-            }
-            libsqlite3_sys::SQLITE_NULL => Ok(SqlRef::Null),
-            _ => Err(Error::new(
-                ErrorKind::DatatypeMismatch,
-                "invalid data type".to_string(),
-            )),
-        }
+        self.iterator.next().unwrap_or(Ok(SqlRef::Null))
     }
 
     /// Amount of rows.
     pub fn len(&self) -> usize {
-        unsafe {
-            libsqlite3_sys::sqlite3_column_count(self.statement.handle())
-                .try_into()
-                .unwrap_or(0)
-        }
+        self.iterator.len()
     }
 
     /// Whether is empty.

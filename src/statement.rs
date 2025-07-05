@@ -1,13 +1,13 @@
 use crate::{
-    convert::{FromRow, ParamList},
-    internal::{RequestMessage, Sender, StatementIndex},
+    blocking::StatementIndex,
+    convert::{FromRow, ParamList, RowReader},
+    worker::{Sender, Work},
     Error, ErrorKind, Result,
 };
 use futures_lite::Stream;
 use std::{
     fmt,
     future::Future,
-    mem,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -45,37 +45,29 @@ impl Statement {
     }
 
     pub(crate) async fn execute(&self, param_list: ParamList) -> Result<u32> {
-        let (tx, rx) = oneshot::channel();
-        self.0.tx_req.send(RequestMessage::StatementBind {
-            index: self.0.index,
-            param_list,
-        })?;
-        self.0.tx_req.send(RequestMessage::StatementExecute {
-            index: self.0.index,
-            tx,
-        })?;
-        self.0.tx_req.send(RequestMessage::StatementReset {
-            index: self.0.index,
-        })?;
-        let (r, _) = rx.await.map_err(|_| Error::background_task_failed())??;
-        Ok(r)
+        let statement = self.0.index;
+        self.0
+            .tx_req
+            .call(move |c| {
+                c.bind(statement, param_list);
+                let r = c.execute(statement).map(|_| c.total_changes());
+                c.reset(statement);
+                r
+            })
+            .await
     }
 
     pub(crate) async fn insert(&self, param_list: ParamList) -> Result<i64> {
-        let (tx, rx) = oneshot::channel();
-        self.0.tx_req.send(RequestMessage::StatementBind {
-            index: self.0.index,
-            param_list,
-        })?;
-        self.0.tx_req.send(RequestMessage::StatementExecute {
-            index: self.0.index,
-            tx,
-        })?;
-        self.0.tx_req.send(RequestMessage::StatementReset {
-            index: self.0.index,
-        })?;
-        let (_, r) = rx.await.map_err(|_| Error::background_task_failed())??;
-        Ok(r)
+        let statement = self.0.index;
+        self.0
+            .tx_req
+            .call(move |c| {
+                c.bind(statement, param_list);
+                let r = c.execute(statement).map(|_| c.last_insert_row_id());
+                c.reset(statement);
+                r
+            })
+            .await
     }
 
     pub(crate) fn query_with<R>(self, param_list: ParamList) -> Rows<R>
@@ -99,8 +91,9 @@ impl fmt::Debug for Statement {
 
 impl Drop for StatementInner {
     fn drop(&mut self) {
-        let index = self.index;
-        let _ = self.tx_req.send(RequestMessage::Finish { index });
+        let statement = self.index;
+        self.tx_req
+            .call_without_return_value(move |c| c.finalize(statement));
     }
 }
 
@@ -112,7 +105,7 @@ pub(crate) struct Rows<R> {
 enum RowsState<R> {
     Param(ParamList),
     Bound,
-    Step(oneshot::Receiver<Option<Result<R>>>),
+    Step(Work<Option<R>>),
     Finish,
 }
 
@@ -126,45 +119,33 @@ where
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<R>>> {
         loop {
             match &mut self.state {
-                RowsState::Param(_) => match mem::replace(&mut self.state, RowsState::Finish) {
-                    RowsState::Param(param_list) => {
-                        match self.statement.0.tx_req.send(RequestMessage::StatementBind {
-                            index: self.statement.0.index,
-                            param_list,
-                        }) {
-                            Ok(_) => {
-                                self.state = RowsState::Bound;
-                            }
-                            Err(e) => return Poll::Ready(Some(Err(e))),
-                        }
-                    }
-                    _ => panic!(),
-                },
+                RowsState::Param(param_list) => {
+                    let param_list = param_list.take();
+                    let statement_index = self.statement.0.index;
+
+                    self.state = RowsState::Bound;
+                    self.statement.0.tx_req.call_without_return_value(move |c| {
+                        c.bind(statement_index, param_list);
+                    });
+                }
 
                 RowsState::Bound => {
-                    let (tx, rx) = oneshot::channel();
-                    if let Err(e) = self.statement.0.tx_req.send(RequestMessage::StatementNext {
-                        index: self.statement.0.index,
-                        callback: Box::new(|r| match r {
-                            Ok((mut row_reader, crate::internal::Step::Row)) => {
-                                let _ = tx.send(Some(R::from_row(&mut row_reader)));
+                    let statement_index = self.statement.0.index;
+                    self.state = RowsState::Step(self.statement.0.tx_req.call(move |c| {
+                        let mut row = None;
+                        c.step(statement_index, &mut |iterator| {
+                            if let Some(iterator) = iterator {
+                                row = Some(R::from_row(RowReader::new(iterator)));
+                            } else {
+                                row = None;
                             }
-                            Ok((_, crate::internal::Step::Done { .. })) => {
-                                let _ = tx.send(None);
-                            }
-                            Err(e) => {
-                                let _ = tx.send(Some(Err(e)));
-                            }
-                        }),
-                    }) {
-                        self.state = RowsState::Finish;
-                        return Poll::Ready(Some(Err(e)));
-                    }
-                    self.state = RowsState::Step(rx);
+                        });
+                        row.transpose()
+                    }));
                 }
 
                 RowsState::Step(rx) => match ready!(Pin::new(rx).poll(cx)) {
-                    Ok(Some(Ok(v))) => {
+                    Ok(Some(v)) => {
                         self.state = RowsState::Bound;
 
                         return Poll::Ready(Some(Ok(v)));
@@ -174,16 +155,10 @@ where
                         self.state = RowsState::Finish;
                     }
 
-                    Ok(Some(Err(e))) => {
+                    Err(e) => {
                         self.state = RowsState::Finish;
 
                         return Poll::Ready(Some(Err(e)));
-                    }
-
-                    Err(_) => {
-                        self.state = RowsState::Finish;
-
-                        return Poll::Ready(Some(Err(Error::background_task_failed())));
                     }
                 },
 
@@ -197,13 +172,10 @@ where
 
 impl<R> Drop for Rows<R> {
     fn drop(&mut self) {
-        let _ = self
-            .statement
-            .0
-            .tx_req
-            .send(RequestMessage::StatementReset {
-                index: self.statement.0.index,
-            });
+        let statement_index = self.statement.0.index;
+        self.statement.0.tx_req.call_without_return_value(move |c| {
+            c.reset(statement_index);
+        });
     }
 }
 
@@ -215,7 +187,7 @@ pub(crate) struct PrepareWith {
 
 enum PrepareState {
     MessageNotSent,
-    MessageSent(oneshot::Receiver<Result<Option<(StatementIndex, usize)>>>),
+    MessageSent(Work<Option<(StatementIndex, usize)>>),
     Finished,
 }
 
@@ -226,20 +198,14 @@ impl Future for PrepareWith {
         loop {
             match &mut self.state {
                 PrepareState::MessageNotSent => {
-                    let (tx, rx) = oneshot::channel();
-                    self.tx_req
-                        .send(RequestMessage::Prepare {
-                            sql: self.sql.clone(),
-                            index_from_start: 0,
-                            tx,
-                        })
-                        .map_err(|_| Error::background_task_failed())?;
-                    self.state = PrepareState::MessageSent(rx);
+                    let sql = self.sql.clone();
+                    self.state =
+                        PrepareState::MessageSent(self.tx_req.call(move |c| c.prepare(&sql)));
                 }
 
                 PrepareState::MessageSent(rx) => match ready!(Pin::new(rx).poll(cx)) {
                     Ok(index_and_rest) => {
-                        let index = index_and_rest?
+                        let index = index_and_rest
                             .ok_or_else(|| Error::new(ErrorKind::Generic, "no statement".into()))?
                             .0;
                         self.state = PrepareState::Finished;
@@ -248,9 +214,9 @@ impl Future for PrepareWith {
                             index,
                         }))));
                     }
-                    Err(_) => {
+                    Err(e) => {
                         self.state = PrepareState::Finished;
-                        return Poll::Ready(Err(Error::background_task_failed()));
+                        return Poll::Ready(Err(e));
                     }
                 },
 
@@ -269,7 +235,7 @@ pub(crate) struct Batch {
 
 enum BatchState {
     MessageNotSent,
-    MessageSent(oneshot::Receiver<Result<Option<(StatementIndex, usize)>>>),
+    MessageSent(Work<Option<(StatementIndex, usize)>>),
     Finished,
 }
 
@@ -280,21 +246,18 @@ impl Stream for Batch {
         loop {
             match &mut self.state {
                 BatchState::MessageNotSent => {
-                    let (tx, rx) = oneshot::channel();
-                    self.tx_req
-                        .send(RequestMessage::Prepare {
-                            sql: self.sql.clone(),
-                            index_from_start: self.index_of_start,
-                            tx,
-                        })
-                        .map_err(|_| Error::background_task_failed())?;
-                    self.state = BatchState::MessageSent(rx);
+                    let sql = self.sql.clone();
+                    let index = self.index_of_start;
+
+                    self.state = BatchState::MessageSent(
+                        self.tx_req.call(move |c| c.prepare(&sql[index..])),
+                    );
                 }
 
                 BatchState::MessageSent(rx) => match ready!(Pin::new(rx).poll(cx)) {
                     Ok(index_and_rest) => {
-                        if let Some((index, rest)) = index_and_rest? {
-                            self.index_of_start = rest;
+                        if let Some((index, rest)) = index_and_rest {
+                            self.index_of_start += rest;
                             self.state = if self.index_of_start >= self.sql.len() {
                                 BatchState::Finished
                             } else {
@@ -308,9 +271,9 @@ impl Stream for Batch {
                             self.state = BatchState::Finished;
                         }
                     }
-                    Err(_) => {
+                    Err(e) => {
                         self.state = BatchState::Finished;
-                        return Poll::Ready(Some(Err(Error::background_task_failed())));
+                        return Poll::Ready(Some(Err(e)));
                     }
                 },
 
