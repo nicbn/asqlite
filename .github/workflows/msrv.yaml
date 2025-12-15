@@ -2,7 +2,11 @@ name: Check minimum supported Rust version
 
 on:
   push:
+    branches:
+      - main
   pull_request:
+    branches:
+      - main
   schedule:
     - cron: '59 1 * * 0' # at 01:59 on monday
 
