@@ -72,7 +72,7 @@ impl_tuple!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T1
 /// Type for reading rows.
 #[repr(transparent)]
 pub struct RowReader<'a> {
-    iterator: dyn ExactSizeIterator<Item = Result<SqlRef<'a>>>,
+    iterator: dyn ExactSizeIterator<Item = Result<SqlRef<'a>>> + 'static,
 }
 
 impl fmt::Debug for RowReader<'_> {
@@ -83,10 +83,14 @@ impl fmt::Debug for RowReader<'_> {
 
 impl<'a> RowReader<'a> {
     pub(crate) fn new<'b>(
-        iterator: &'b mut dyn ExactSizeIterator<Item = Result<SqlRef<'a>>>,
+        iterator: &'b mut (dyn ExactSizeIterator<Item = Result<SqlRef<'a>>> + 'b),
     ) -> &'b mut Self {
         unsafe {
-            &mut *(iterator as *mut dyn ExactSizeIterator<Item = Result<SqlRef<'a>>> as *mut Self)
+            let iterator = core::mem::transmute::<
+                *mut (dyn ExactSizeIterator<Item = Result<SqlRef<'a>>> + 'b),
+                *mut (dyn ExactSizeIterator<Item = Result<SqlRef<'a>>> + 'static),
+            >(iterator);
+            &mut *(iterator as *mut Self)
         }
     }
 
