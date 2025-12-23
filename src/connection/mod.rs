@@ -145,7 +145,7 @@ impl Connection {
         self.prepare_with(sql, cache).await
     }
 
-    pub(crate) fn prepare_with(&mut self, sql: &str, cache: bool) -> Prepare {
+    pub(crate) fn prepare_with(&mut self, sql: &str, cache: bool) -> Prepare<'_> {
         if let Some(cache) = self.cache.get(sql) {
             return Prepare {
                 state: PrepareState::Cached {
@@ -167,7 +167,7 @@ impl Connection {
         }
     }
 
-    fn statement(&mut self, statement: impl IntoStatement) -> IntoStatementStruct {
+    fn statement(&mut self, statement: impl IntoStatement) -> IntoStatementStruct<'_> {
         let state = match IntoStatement::__into_str_or_statement(&statement) {
             __StrOrStatement::Str(v) => IntoStatementState::Prepare(self.prepare_with(v, true)),
             __StrOrStatement::Statement(v) => IntoStatementState::Statement(v),

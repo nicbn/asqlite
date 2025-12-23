@@ -1,5 +1,5 @@
 use super::{FromSql, SqlRef};
-use crate::{convert::Sql, Result};
+use crate::{blocking::Row, convert::Sql, Result};
 use std::fmt;
 
 /// Convert SQLite rows into Rust tuples.
@@ -70,9 +70,9 @@ impl_tuple!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15);
 impl_tuple!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16);
 
 /// Type for reading rows.
-#[repr(transparent)]
 pub struct RowReader<'a> {
-    iterator: dyn ExactSizeIterator<Item = Result<SqlRef<'a>>> + 'static,
+    row: &'a mut dyn Row,
+    next: usize,
 }
 
 impl fmt::Debug for RowReader<'_> {
@@ -82,26 +82,24 @@ impl fmt::Debug for RowReader<'_> {
 }
 
 impl<'a> RowReader<'a> {
-    pub(crate) fn new<'b>(
-        iterator: &'b mut (dyn ExactSizeIterator<Item = Result<SqlRef<'a>>> + 'b),
-    ) -> &'b mut Self {
-        unsafe {
-            let iterator = core::mem::transmute::<
-                *mut (dyn ExactSizeIterator<Item = Result<SqlRef<'a>>> + 'b),
-                *mut (dyn ExactSizeIterator<Item = Result<SqlRef<'a>>> + 'static),
-            >(iterator);
-            &mut *(iterator as *mut Self)
-        }
+    pub(crate) fn new(row: &'a mut dyn Row) -> Self {
+        Self { row, next: 0 }
     }
 
     /// Read a column.
-    pub fn read(&mut self) -> Result<SqlRef> {
-        self.iterator.next().unwrap_or(Ok(SqlRef::Null))
+    pub fn read(&mut self) -> Result<SqlRef<'_>> {
+        match self.row.get(self.next).transpose()? {
+            Some(x) => {
+                self.next += 1;
+                Ok(x)
+            }
+            None => Ok(SqlRef::Null),
+        }
     }
 
     /// Amount of rows.
     pub fn len(&self) -> usize {
-        self.iterator.len()
+        self.row.row_len() - self.next
     }
 
     /// Whether is empty.

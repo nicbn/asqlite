@@ -132,15 +132,10 @@ where
                 RowsState::Bound => {
                     let statement_index = self.statement.0.index;
                     self.state = RowsState::Step(self.statement.0.tx_req.call(move |c| {
-                        let mut row = None;
-                        c.step(statement_index, &mut |iterator| {
-                            if let Some(iterator) = iterator {
-                                row = Some(R::from_row(RowReader::new(iterator)));
-                            } else {
-                                row = None;
-                            }
-                        });
-                        row.transpose()
+                        match c.step(statement_index)? {
+                            Some(row) => Ok(Some(R::from_row(&mut RowReader::new(row))?)),
+                            None => Ok(None),
+                        }
                     }));
                 }
 
