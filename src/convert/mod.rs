@@ -59,7 +59,7 @@ pub enum Sql {
 impl Sql {
     /// Borrow [`SqlRef`].
     #[inline]
-    pub fn borrow(&self) -> SqlRef {
+    pub fn borrow(&self) -> SqlRef<'_> {
         match self {
             Self::Int(v) => SqlRef::Int(*v),
             Self::Float(v) => SqlRef::Float(*v),

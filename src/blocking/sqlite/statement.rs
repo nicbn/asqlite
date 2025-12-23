@@ -1,5 +1,5 @@
 use crate::{
-    blocking::sqlite::ConnectionHandle,
+    blocking::{sqlite::ConnectionHandle, Row},
     convert::{Param, ParamList, SqlRef},
     Error, ErrorKind, Result, ZeroBlob,
 };
@@ -92,15 +92,82 @@ impl Statement {
         }
     }
 
-    pub(crate) fn row_reader(&self) -> RowReader {
-        RowReader {
-            statement: self,
-            next: 0,
-        }
-    }
-
     pub(crate) fn handle(&self) -> *mut libsqlite3_sys::sqlite3_stmt {
         self.handle.as_ptr()
+    }
+}
+
+impl Row for Statement {
+    fn row_len(&self) -> usize {
+        usize::try_from(unsafe { libsqlite3_sys::sqlite3_column_count(self.handle()) }).unwrap_or(0)
+    }
+
+    fn get(&self, idx: usize) -> Option<Result<SqlRef<'_>>> {
+        if idx >= self.row_len() {
+            return None;
+        }
+
+        let idx = c_int::try_from(idx).ok()?;
+
+        match unsafe { libsqlite3_sys::sqlite3_column_type(self.handle(), idx) } {
+            libsqlite3_sys::SQLITE_INTEGER => {
+                let value =
+                    unsafe { libsqlite3_sys::sqlite3_column_int64(self.handle(), idx) };
+                Some(Ok(SqlRef::Int(value)))
+            }
+            libsqlite3_sys::SQLITE_FLOAT => {
+                let value = unsafe {
+                    libsqlite3_sys::sqlite3_column_double(self.handle(), idx)
+                };
+                Some(Ok(SqlRef::Float(value)))
+            }
+            libsqlite3_sys::SQLITE_TEXT => {
+                let ptr =
+                    unsafe { libsqlite3_sys::sqlite3_column_text(self.handle(), idx) };
+
+                if ptr.is_null() {
+                    return Some(Ok(SqlRef::Text("")));
+                }
+
+                let size =
+                    unsafe { libsqlite3_sys::sqlite3_column_bytes(self.handle(), idx) };
+                let Ok(size) = size.try_into() else {
+                    return Some(Err(Error::from(ErrorKind::OutOfRange)));
+                };
+
+                let slice = unsafe { slice::from_raw_parts(ptr, size) };
+
+                // If the text is not actually UTF-8, pretend it is a blob
+                if let Ok(x) = str::from_utf8(slice) {
+                    Some(Ok(SqlRef::Text(x)))
+                } else {
+                    Some(Ok(SqlRef::Blob(slice)))
+                }
+            }
+            libsqlite3_sys::SQLITE_BLOB => {
+                let ptr =
+                    unsafe { libsqlite3_sys::sqlite3_column_text(self.handle(), idx) };
+
+                if ptr.is_null() {
+                    return Some(Ok(SqlRef::Blob(&[])));
+                }
+
+                let size =
+                    unsafe { libsqlite3_sys::sqlite3_column_bytes(self.handle(), idx) };
+                let Ok(size) = size.try_into() else {
+                    return Some(Err(Error::from(ErrorKind::OutOfRange)));
+                };
+
+                Some(Ok(SqlRef::Blob(unsafe {
+                    slice::from_raw_parts(ptr, size)
+                })))
+            }
+            libsqlite3_sys::SQLITE_NULL => Some(Ok(SqlRef::Null)),
+            _ => Some(Err(Error::new(
+                ErrorKind::DatatypeMismatch,
+                "invalid data type".to_string(),
+            ))),
+        }
     }
 }
 
@@ -242,92 +309,6 @@ impl<'a> ParamBinder<'a> {
         }
 
         Ok(())
-    }
-}
-
-pub(super) struct RowReader<'a> {
-    statement: &'a Statement,
-    next: c_int,
-}
-
-impl ExactSizeIterator for RowReader<'_> {}
-
-impl<'a> Iterator for RowReader<'a> {
-    type Item = Result<SqlRef<'a>>;
-
-    fn next(&mut self) -> Option<Result<SqlRef<'a>>> {
-        let index = self.next;
-        if index >= unsafe { libsqlite3_sys::sqlite3_column_count(self.statement.handle()) } {
-            return None;
-        }
-
-        self.next += 1;
-
-        match unsafe { libsqlite3_sys::sqlite3_column_type(self.statement.handle(), index) } {
-            libsqlite3_sys::SQLITE_INTEGER => {
-                let value =
-                    unsafe { libsqlite3_sys::sqlite3_column_int64(self.statement.handle(), index) };
-                Some(Ok(SqlRef::Int(value)))
-            }
-            libsqlite3_sys::SQLITE_FLOAT => {
-                let value = unsafe {
-                    libsqlite3_sys::sqlite3_column_double(self.statement.handle(), index)
-                };
-                Some(Ok(SqlRef::Float(value)))
-            }
-            libsqlite3_sys::SQLITE_TEXT => {
-                let ptr =
-                    unsafe { libsqlite3_sys::sqlite3_column_text(self.statement.handle(), index) };
-
-                if ptr.is_null() {
-                    return Some(Ok(SqlRef::Text("")));
-                }
-
-                let size =
-                    unsafe { libsqlite3_sys::sqlite3_column_bytes(self.statement.handle(), index) };
-                let Ok(size) = size.try_into() else {
-                    return Some(Err(Error::from(ErrorKind::OutOfRange)));
-                };
-
-                let slice = unsafe { slice::from_raw_parts(ptr, size) };
-
-                // If the text is not actually UTF-8, pretend it is a blob
-                if let Ok(x) = str::from_utf8(slice) {
-                    Some(Ok(SqlRef::Text(x)))
-                } else {
-                    Some(Ok(SqlRef::Blob(slice)))
-                }
-            }
-            libsqlite3_sys::SQLITE_BLOB => {
-                let ptr =
-                    unsafe { libsqlite3_sys::sqlite3_column_text(self.statement.handle(), index) };
-
-                if ptr.is_null() {
-                    return Some(Ok(SqlRef::Blob(&[])));
-                }
-
-                let size =
-                    unsafe { libsqlite3_sys::sqlite3_column_bytes(self.statement.handle(), index) };
-                let Ok(size) = size.try_into() else {
-                    return Some(Err(Error::from(ErrorKind::OutOfRange)));
-                };
-
-                Some(Ok(SqlRef::Blob(unsafe {
-                    slice::from_raw_parts(ptr, size)
-                })))
-            }
-            libsqlite3_sys::SQLITE_NULL => Some(Ok(SqlRef::Null)),
-            _ => Some(Err(Error::new(
-                ErrorKind::DatatypeMismatch,
-                "invalid data type".to_string(),
-            ))),
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let size = unsafe { libsqlite3_sys::sqlite3_column_count(self.statement.handle()) };
-
-        (size as usize, Some(size as usize))
     }
 }
 

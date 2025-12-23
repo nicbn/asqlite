@@ -2,9 +2,9 @@ use crate::{
     blocking::{
         self,
         sqlite::{Blob, Statement, Step},
-        BlobIndex,
+        BlobIndex, Row,
     },
-    convert::{ParamList, SqlRef},
+    convert::ParamList,
     utils::vec_arena::VecArena,
     Error, ErrorKind, Result,
 };
@@ -110,23 +110,14 @@ impl blocking::Connection for Connection {
         }
     }
 
-    fn step(
-        &mut self,
-        statement: blocking::StatementIndex,
-        callback: &mut dyn FnMut(Option<&mut dyn ExactSizeIterator<Item = Result<SqlRef>>>),
-    ) {
-        match self
+    fn step(&mut self, statement: blocking::StatementIndex) -> Result<Option<&mut dyn Row>> {
+        let statement = self
             .statements
             .get_mut(statement.0)
-            .ok_or_else(|| Error::from(ErrorKind::Misuse))
-            .and_then(|statement| Ok((statement.step()?, statement)))
-        {
-            Ok((Step::Row, stmt)) => callback(Some(&mut stmt.row_reader())),
-            Ok((Step::Done, _)) => callback(None),
-            Err(e) => {
-                callback(Some(&mut Some(Err(e)).into_iter()));
-                callback(None);
-            }
+            .ok_or_else(|| Error::from(ErrorKind::Misuse))?;
+        match statement.step()? {
+            Step::Row => Ok(Some(statement)),
+            Step::Done => Ok(None),
         }
     }
 

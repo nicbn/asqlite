@@ -27,11 +27,7 @@ pub(crate) trait Connection {
 
     fn bind(&mut self, statement: StatementIndex, param_list: ParamList);
 
-    fn step(
-        &mut self,
-        statement: StatementIndex,
-        callback: &mut dyn FnMut(Option<&mut dyn ExactSizeIterator<Item = Result<SqlRef>>>),
-    );
+    fn step(&mut self, statement: StatementIndex) -> Result<Option<&mut dyn Row>>;
 
     fn execute(&mut self, statement: StatementIndex) -> Result<()>;
 
@@ -81,6 +77,11 @@ pub(crate) trait Connection {
     fn last_insert_row_id(&mut self) -> i64;
 
     fn total_changes(&mut self) -> u32;
+}
+
+pub(crate) trait Row {
+    fn row_len(&self) -> usize;
+    fn get(&self, idx: usize) -> Option<Result<SqlRef<'_>>>;
 }
 
 pub(crate) trait InterruptHandle: Send + Sync + RefUnwindSafe {
