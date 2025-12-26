@@ -25,7 +25,7 @@ mod write;
 /// # let mut conn = asqlite::Connection::builder()
 /// #    .write(true)
 /// #    .create(true)
-/// #    .open_memory(":memory")
+/// #    .open_memory("db1")
 /// #    .await?;
 /// # conn.execute("CREATE TABLE my_table (column BLOB);", ()).await?;
 /// use futures::AsyncWriteExt;

@@ -33,7 +33,7 @@ pub use self::builder::*;
 /// let mut conn = asqlite::Connection::builder()
 ///     .write(true)
 ///     .create(true)
-///     .open_memory(":memory")
+///     .open_memory("db1")
 ///     .await?;
 /// conn.execute("CREATE TABLE person (name TEXT, age INTEGER)", ())
 ///     .await?;
@@ -84,7 +84,7 @@ impl Connection {
     /// let conn = asqlite::Connection::builder()
     ///     .write(true)
     ///     .create(true)
-    ///     .open_memory(":memory")
+    ///     .open_memory("db1")
     ///     .await?;
     /// # asqlite::Result::<()>::Ok(())
     /// # }).unwrap();
@@ -124,7 +124,7 @@ impl Connection {
     /// # let mut conn = asqlite::Connection::builder()
     /// #    .write(true)
     /// #    .create(true)
-    /// #    .open_memory(":memory")
+    /// #    .open_memory("db1")
     /// #    .await?;
     /// # conn.execute("CREATE TABLE user (user_id INT, secret TEXT)", ()).await?;
     /// # conn.execute("INSERT INTO user (user_id, secret) VALUES (1, ':)')", ()).await?;
@@ -185,7 +185,7 @@ impl Connection {
     /// # let mut conn = asqlite::Connection::builder()
     /// #    .write(true)
     /// #    .create(true)
-    /// #    .open_memory(":memory")
+    /// #    .open_memory("db1")
     /// #    .await?;
     /// # conn.execute("CREATE TABLE table_1 (id INT)", ()).await?;
     /// # conn.execute("CREATE TABLE table_2 (id INT)", ()).await?;
@@ -218,7 +218,7 @@ impl Connection {
     /// # let mut conn = asqlite::Connection::builder()
     /// #    .write(true)
     /// #    .create(true)
-    /// #    .open_memory(":memory")
+    /// #    .open_memory("db1")
     /// #    .await?;
     /// conn.execute("CREATE TABLE user (user_id INT, secret TEXT)", ()).await?;
     /// # asqlite::Result::<()>::Ok(())
@@ -244,7 +244,7 @@ impl Connection {
     /// # let mut conn = asqlite::Connection::builder()
     /// #    .write(true)
     /// #    .create(true)
-    /// #    .open_memory(":memory")
+    /// #    .open_memory("db1")
     /// #    .await?;
     /// conn.execute_batch(
     ///     r#"CREATE TABLE user (user_id INT, secret TEXT);
@@ -276,7 +276,7 @@ impl Connection {
     /// # let mut conn = asqlite::Connection::builder()
     /// #    .write(true)
     /// #    .create(true)
-    /// #    .open_memory(":memory")
+    /// #    .open_memory("db1")
     /// #    .await?;
     /// # conn.execute("CREATE TABLE table_1 (id INT)", ()).await?;
     /// let row = conn.insert(
@@ -307,7 +307,7 @@ impl Connection {
     /// # let mut conn = asqlite::Connection::builder()
     /// #    .write(true)
     /// #    .create(true)
-    /// #    .open_memory(":memory")
+    /// #    .open_memory("db1")
     /// #    .await?;
     /// # conn.execute("CREATE TABLE user (user_id INT, secret TEXT)", ()).await?;
     /// # conn.execute("INSERT INTO user (user_id, secret) VALUES (1, ':)')", ()).await?;
@@ -345,7 +345,7 @@ impl Connection {
     /// # let mut conn = asqlite::Connection::builder()
     /// #    .write(true)
     /// #    .create(true)
-    /// #    .open_memory(":memory")
+    /// #    .open_memory("db1")
     /// #    .await?;
     /// # conn.execute("CREATE TABLE user (user_id INT, secret TEXT)", ()).await?;
     /// # conn.execute("INSERT INTO user (user_id, secret) VALUES (1, ':)')", ()).await?;
@@ -433,7 +433,7 @@ impl Connection {
     /// # let mut conn = asqlite::Connection::builder()
     /// #    .write(true)
     /// #    .create(true)
-    /// #    .open_memory(":memory")
+    /// #    .open_memory("db1")
     /// #    .await?;
     /// # conn.execute("CREATE TABLE my_table (column BLOB);", ()).await?;
     /// let id = conn.insert("INSERT INTO my_table (column) VALUES (?);",
