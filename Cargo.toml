@@ -32,3 +32,7 @@ tokio = { version = "1.44.2", features = [
     "rt",
     "rt-multi-thread",
 ] }
+
+[[bench]]
+name = "blob"
+harness = false
