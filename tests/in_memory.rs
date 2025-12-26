@@ -6,7 +6,7 @@ async fn query() {
     let mut conn = asqlite::Connection::builder()
         .write(true)
         .create(true)
-        .open_memory(":memory")
+        .open_memory("db1")
         .await
         .unwrap();
 
@@ -39,7 +39,7 @@ async fn update() {
     let mut conn = asqlite::Connection::builder()
         .write(true)
         .create(true)
-        .open_memory(":memory")
+        .open_memory("db1")
         .await
         .unwrap();
 
@@ -75,7 +75,7 @@ async fn collation() {
     let mut conn = asqlite::Connection::builder()
         .write(true)
         .create(true)
-        .open_memory(":memory")
+        .open_memory("db1")
         .await
         .unwrap();
 

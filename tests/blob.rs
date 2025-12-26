@@ -7,7 +7,7 @@ async fn read() {
     let mut conn = asqlite::Connection::builder()
         .write(true)
         .create(true)
-        .open_memory(":memory")
+        .open_memory("db1")
         .await
         .unwrap();
 
@@ -60,7 +60,7 @@ async fn write() {
     let mut conn = asqlite::Connection::builder()
         .write(true)
         .create(true)
-        .open_memory(":memory")
+        .open_memory("db1")
         .await
         .unwrap();
 
@@ -114,7 +114,7 @@ async fn large() {
     let mut conn = asqlite::Connection::builder()
         .write(true)
         .create(true)
-        .open_memory(":memory")
+        .open_memory("db1")
         .await
         .unwrap();
 
