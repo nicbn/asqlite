@@ -17,11 +17,11 @@ It wraps the `libsqlite3` library.
 ## Example
 
 ```rs
-// Create an in-memory database connection with the name :memory
+// Create an in-memory database connection with the name db1
 let mut conn = asqlite::Connection::builder()
     .create(true) // create if it does not exists
     .write(true) // read and write
-    .open_memory(":memory") // to open a file, use .open(path)
+    .open_memory("db1") // to open a file, use .open(path)
     .await?;
 
 // Create a table
