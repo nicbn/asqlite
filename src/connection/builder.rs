@@ -21,7 +21,7 @@ impl ConnectionBuilder {
     /// let conn = asqlite::ConnectionBuilder::new()
     ///     .write(true)
     ///     .create(true)
-    ///     .open_memory(":memory")
+    ///     .open_memory("db1")
     ///     .await?;
     /// # asqlite::Result::<()>::Ok(())
     /// # }).unwrap();
@@ -48,7 +48,7 @@ impl ConnectionBuilder {
     /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// let conn = asqlite::ConnectionBuilder::new()
     ///     .write(true)
-    ///     .open_memory(":memory")
+    ///     .open_memory("db1")
     ///     .await?;
     /// # asqlite::Result::<()>::Ok(())
     /// # }).unwrap();
@@ -72,7 +72,7 @@ impl ConnectionBuilder {
     /// let conn = asqlite::ConnectionBuilder::new()
     ///     .write(true)
     ///     .create(true)
-    ///     .open_memory(":memory")
+    ///     .open_memory("db1")
     ///     .await?;
     /// # asqlite::Result::<()>::Ok(())
     /// # }).unwrap();
@@ -94,7 +94,7 @@ impl ConnectionBuilder {
     /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// let conn = asqlite::ConnectionBuilder::new()
     ///     .shared_cache(true)
-    ///     .open_memory(":memory")
+    ///     .open_memory("db1")
     ///     .await?;
     /// # asqlite::Result::<()>::Ok(())
     /// # }).unwrap();
@@ -115,7 +115,7 @@ impl ConnectionBuilder {
     /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// let conn = asqlite::ConnectionBuilder::new()
     ///     .statement_cache_capacity(1024)
-    ///     .open_memory(":memory")
+    ///     .open_memory("db1")
     ///     .await?;
     /// # asqlite::Result::<()>::Ok(())
     /// # }).unwrap();
@@ -192,7 +192,7 @@ impl ConnectionBuilder {
     /// ```
     /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     /// let conn = asqlite::ConnectionBuilder::new()
-    ///     .open_memory(":memory")
+    ///     .open_memory("db1")
     ///     .await?;
     /// # asqlite::Result::<()>::Ok(())
     /// # }).unwrap();
