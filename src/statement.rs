@@ -1,9 +1,10 @@
 use crate::{
-    blocking::StatementIndex,
+    blocking::{self, StatementIndex},
     convert::{FromRow, ParamList, RowReader},
-    worker::{Sender, Work},
+    worker::{AsyncRequest, Sender, Work},
     Error, ErrorKind, Result,
 };
+use futures_channel::mpsc;
 use futures_core::Stream;
 use std::{
     fmt,
@@ -36,12 +37,14 @@ impl Statement {
     }
 
     pub(crate) fn prepare_batch(tx_req: Sender, sql: Arc<str>) -> Batch {
-        Batch {
+        let (tx, rx) = mpsc::channel::<Result<StatementIndex>>(1);
+        let request = BatchRequest {
             sql,
             index_of_start: 0,
-            tx_req,
-            state: BatchState::MessageNotSent,
-        }
+            tx,
+        };
+        tx_req.spawn(request);
+        Batch(tx_req, rx)
     }
 
     pub(crate) async fn execute(&self, param_list: ParamList) -> Result<u32> {
@@ -70,14 +73,42 @@ impl Statement {
             .await
     }
 
+    pub(crate) async fn query_first<R>(self, param_list: ParamList) -> Result<Option<R>>
+    where
+        R: FromRow + Send + 'static,
+    {
+        let statement = self.0.index;
+        self.0
+            .tx_req
+            .call(move |c| {
+                c.bind(statement, param_list);
+                let row = match c.step(statement) {
+                    Ok(Some(row)) => {
+                        let mut reader = RowReader::new(row);
+                        let result = R::from_row(&mut reader);
+                        result.map(Some)
+                    }
+                    Ok(None) => Ok(None),
+                    Err(e) => Err(e),
+                };
+                c.reset(statement);
+                row
+            })
+            .await
+    }
+
     pub(crate) fn query_with<R>(self, param_list: ParamList) -> Rows<R>
     where
         R: FromRow + Send + 'static,
     {
-        Rows {
-            statement: self,
-            state: RowsState::Param(param_list),
-        }
+        let (tx, rx) = mpsc::channel::<Result<R>>(1);
+        let request = RowsRequest {
+            statement: self.0.index,
+            param: Some(param_list),
+            tx,
+        };
+        self.0.tx_req.spawn(request);
+        rx
     }
 }
 
@@ -97,82 +128,7 @@ impl Drop for StatementInner {
     }
 }
 
-pub(crate) struct Rows<R> {
-    statement: Statement,
-    state: RowsState<R>,
-}
-
-enum RowsState<R> {
-    Param(ParamList),
-    Bound,
-    Step(Work<Option<R>>),
-    Finish,
-}
-
-impl<R> Stream for Rows<R>
-where
-    R: FromRow,
-    R: Send + 'static,
-{
-    type Item = Result<R>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<R>>> {
-        loop {
-            match &mut self.state {
-                RowsState::Param(param_list) => {
-                    let param_list = param_list.take();
-                    let statement_index = self.statement.0.index;
-
-                    self.state = RowsState::Bound;
-                    self.statement.0.tx_req.call_without_return_value(move |c| {
-                        c.bind(statement_index, param_list);
-                    });
-                }
-
-                RowsState::Bound => {
-                    let statement_index = self.statement.0.index;
-                    self.state = RowsState::Step(self.statement.0.tx_req.call(move |c| {
-                        match c.step(statement_index)? {
-                            Some(row) => Ok(Some(R::from_row(&mut RowReader::new(row))?)),
-                            None => Ok(None),
-                        }
-                    }));
-                }
-
-                RowsState::Step(rx) => match ready!(Pin::new(rx).poll(cx)) {
-                    Ok(Some(v)) => {
-                        self.state = RowsState::Bound;
-
-                        return Poll::Ready(Some(Ok(v)));
-                    }
-
-                    Ok(None) => {
-                        self.state = RowsState::Finish;
-                    }
-
-                    Err(e) => {
-                        self.state = RowsState::Finish;
-
-                        return Poll::Ready(Some(Err(e)));
-                    }
-                },
-
-                RowsState::Finish => {
-                    return Poll::Ready(None);
-                }
-            }
-        }
-    }
-}
-
-impl<R> Drop for Rows<R> {
-    fn drop(&mut self) {
-        let statement_index = self.statement.0.index;
-        self.statement.0.tx_req.call_without_return_value(move |c| {
-            c.reset(statement_index);
-        });
-    }
-}
+pub(crate) type Rows<R> = mpsc::Receiver<Result<R>>;
 
 pub(crate) struct PrepareWith {
     tx_req: Sender,
@@ -221,61 +177,111 @@ impl Future for PrepareWith {
     }
 }
 
-pub(crate) struct Batch {
-    sql: Arc<str>,
-    index_of_start: usize,
-    tx_req: Sender,
-    state: BatchState,
-}
-
-enum BatchState {
-    MessageNotSent,
-    MessageSent(Work<Option<(StatementIndex, usize)>>),
-    Finished,
-}
+pub(crate) struct Batch(Sender, mpsc::Receiver<Result<StatementIndex>>);
 
 impl Stream for Batch {
     type Item = Result<Statement>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        match ready!(Pin::new(&mut self.1).poll_next(cx)) {
+            Some(Ok(index)) => Poll::Ready(Some(Ok(Statement(Arc::new(StatementInner {
+                tx_req: self.0.clone(),
+                index,
+            }))))),
+            Some(Err(e)) => Poll::Ready(Some(Err(e))),
+            None => Poll::Ready(None),
+        }
+    }
+}
+
+struct BatchRequest {
+    sql: Arc<str>,
+    index_of_start: usize,
+    tx: mpsc::Sender<Result<StatementIndex>>,
+}
+
+impl AsyncRequest for BatchRequest {
+    fn poll(
+        &mut self,
+        cx: &mut Context,
+        connection: Option<&mut dyn blocking::Connection>,
+    ) -> Poll<()> {
+        let Some(connection) = connection else {
+            let _ = ready!(self.tx.poll_ready(cx)); // ignore error
+            let _ = self.tx.try_send(Err(ErrorKind::ConnectionClosed.into())); // ignore error
+            return Poll::Ready(());
+        };
+
         loop {
-            match &mut self.state {
-                BatchState::MessageNotSent => {
-                    let sql = self.sql.clone();
-                    let index = self.index_of_start;
+            match connection.prepare(&self.sql[self.index_of_start..]) {
+                Ok(Some((statement_index, rest))) => {
+                    if ready!(self.tx.poll_ready(cx)).is_err()
+                        || self.tx.try_send(Ok(statement_index)).is_err()
+                    {
+                        break;
+                    }
 
-                    self.state = BatchState::MessageSent(
-                        self.tx_req.call(move |c| c.prepare(&sql[index..])),
-                    );
+                    self.index_of_start += rest;
                 }
-
-                BatchState::MessageSent(rx) => match ready!(Pin::new(rx).poll(cx)) {
-                    Ok(index_and_rest) => {
-                        if let Some((index, rest)) = index_and_rest {
-                            self.index_of_start += rest;
-                            self.state = if self.index_of_start >= self.sql.len() {
-                                BatchState::Finished
-                            } else {
-                                BatchState::MessageNotSent
-                            };
-                            return Poll::Ready(Some(Ok(Statement(Arc::new(StatementInner {
-                                tx_req: self.tx_req.clone(),
-                                index,
-                            })))));
-                        } else {
-                            self.state = BatchState::Finished;
-                        }
-                    }
-                    Err(e) => {
-                        self.state = BatchState::Finished;
-                        return Poll::Ready(Some(Err(e)));
-                    }
-                },
-
-                BatchState::Finished => {
-                    return Poll::Ready(None);
+                Ok(None) => break,
+                Err(e) => {
+                    let _ = ready!(self.tx.poll_ready(cx)); // ignore error
+                    let _ = self.tx.try_send(Err(e)); // ignore error
+                    break;
                 }
             }
         }
+
+        Poll::Ready(())
+    }
+}
+
+struct RowsRequest<R> {
+    statement: StatementIndex,
+    param: Option<ParamList>,
+    tx: mpsc::Sender<Result<R>>,
+}
+
+impl<R> AsyncRequest for RowsRequest<R>
+where
+    R: FromRow,
+    R: Send + 'static,
+{
+    fn poll(
+        &mut self,
+        cx: &mut Context,
+        connection: Option<&mut dyn blocking::Connection>,
+    ) -> Poll<()> {
+        let Some(connection) = connection else {
+            let _ = ready!(self.tx.poll_ready(cx)); // ignore error
+            let _ = self.tx.try_send(Err(ErrorKind::ConnectionClosed.into())); // ignore error
+            return Poll::Ready(());
+        };
+
+        if let Some(param_list) = self.param.take() {
+            connection.bind(self.statement, param_list);
+        }
+
+        loop {
+            match connection.step(self.statement) {
+                Ok(Some(row)) => {
+                    let mut reader = RowReader::new(row);
+                    let result = R::from_row(&mut reader);
+                    if ready!(self.tx.poll_ready(cx)).is_err() || self.tx.try_send(result).is_err()
+                    {
+                        break;
+                    }
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    let _ = ready!(self.tx.poll_ready(cx)); // ignore error
+                    let _ = self.tx.try_send(Err(e)); // ignore error
+                    break;
+                }
+            }
+        }
+
+        connection.reset(self.statement);
+        Poll::Ready(())
     }
 }

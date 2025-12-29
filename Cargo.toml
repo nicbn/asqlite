@@ -17,10 +17,10 @@ default = []
 bundled = ["libsqlite3-sys/bundled"]
 
 [dependencies]
+futures-channel = "0.3.31"
 futures-core = "0.3.31"
 futures-io = "0.3.31"
 libsqlite3-sys = "0.34.0"
-oneshot = "0.1.11"
 rustc-hash = "2.1.1"
 
 [dev-dependencies]

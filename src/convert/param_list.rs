@@ -2,7 +2,7 @@ use crate::{
     convert::{IntoSql, Sql},
     Error, Result,
 };
-use std::{borrow::Cow, iter, mem};
+use std::{borrow::Cow, iter};
 
 #[derive(Debug, Default)]
 pub(crate) struct Param {
@@ -30,11 +30,6 @@ impl ParamList {
             error: None,
             initialized: 0,
         }
-    }
-
-    /// Take the parameter list.
-    pub(crate) fn take(&mut self) -> Self {
-        mem::replace(self, ParamList::from(()))
     }
 }
 

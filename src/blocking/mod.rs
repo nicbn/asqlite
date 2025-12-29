@@ -14,13 +14,13 @@ pub(crate) struct BlobIndex(pub(crate) usize);
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct StatementIndex(pub(crate) usize);
 
-pub(crate) trait ConnectionFactory: Send {
+pub(crate) trait ConnectionFactory: Unpin + Send {
     type Connection: Connection;
 
     fn open(&self, path: &CStr, flags: i32) -> Result<Self::Connection>;
 }
 
-pub(crate) trait Connection {
+pub(crate) trait Connection: Unpin {
     fn interrupt_handle(&self) -> Arc<dyn InterruptHandle>;
 
     fn prepare(&mut self, sql: &str) -> Result<Option<(StatementIndex, usize)>>;
