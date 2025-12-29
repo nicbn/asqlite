@@ -364,8 +364,10 @@ impl Connection {
         statement: impl IntoStatement,
         param_list: impl Into<ParamList>,
     ) -> Result<Option<R>> {
-        let mut v = self.query(statement, param_list);
-        future::poll_fn(move |cx| Pin::new(&mut v).poll_next(cx).map(|v| v.transpose())).await
+        self.statement(statement)
+            .await?
+            .query_first(param_list.into())
+            .await
     }
 
     /// Reset the connection busy handler.

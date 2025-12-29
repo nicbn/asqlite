@@ -22,10 +22,10 @@ name = "asqlite"
 version = "1.3.0"
 dependencies = [
  "futures",
+ "futures-channel",
  "futures-core",
  "futures-io",
  "libsqlite3-sys",
- "oneshot",
  "rusqlite",
  "rustc-hash",
  "tokio",
@@ -260,12 +260,6 @@ checksum = "62948e14d923ea95ea2c7c86c71013138b66525b86bdc08d2dcc262bdb497b87"
 dependencies = [
  "memchr",
 ]
-
-[[package]]
-name = "oneshot"
-version = "0.1.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ce411919553d3f9fa53a0880544cda985a112117a0444d5ff1e870a893d6ea"
 
 [[package]]
 name = "pin-project-lite"
