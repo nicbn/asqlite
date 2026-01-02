@@ -1,13 +1,22 @@
 use asqlite::{params, BlobOpenMode};
 use futures::{AsyncReadExt, AsyncWriteExt, StreamExt};
-use std::io::{self, SeekFrom};
+use std::{
+    io::{self, SeekFrom},
+    sync::atomic::{AtomicUsize, Ordering},
+};
+
+fn db_name() -> String {
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    COUNTER.load(Ordering::Relaxed).to_string()
+}
 
 #[tokio::test]
 async fn read() {
     let mut conn = asqlite::Connection::builder()
         .write(true)
         .create(true)
-        .open_memory(":memory")
+        .open_memory(&db_name())
         .await
         .unwrap();
 
@@ -60,7 +69,7 @@ async fn write() {
     let mut conn = asqlite::Connection::builder()
         .write(true)
         .create(true)
-        .open_memory(":memory")
+        .open_memory(&db_name())
         .await
         .unwrap();
 
@@ -93,6 +102,13 @@ async fn write() {
     blob.write(&[10]).await.unwrap();
     blob.flush().await.unwrap();
 
+    blob.seek(SeekFrom::End(0)).unwrap();
+
+    assert_eq!(
+        blob.write_all(&[0]).await.unwrap_err().kind(),
+        io::ErrorKind::WriteZero,
+    );
+
     drop(blob);
 
     let data: Vec<u8> = conn
@@ -114,7 +130,7 @@ async fn large() {
     let mut conn = asqlite::Connection::builder()
         .write(true)
         .create(true)
-        .open_memory(":memory")
+        .open_memory(&db_name())
         .await
         .unwrap();
 

@@ -25,22 +25,17 @@ impl Blob {
         unsafe { libsqlite3_sys::sqlite3_blob_bytes(self.handle.as_ptr()) as i64 as u64 }
     }
 
-    pub(crate) fn read(&self, chunk: &mut Vec<u8>, position: u64, bytes: usize) -> Result<()> {
-        chunk.reserve(bytes);
-
+    pub(crate) fn read(&self, chunk: &mut [u8], position: u64) -> Result<()> {
         match unsafe {
             libsqlite3_sys::sqlite3_blob_read(
                 self.handle.as_ptr(),
-                chunk.spare_capacity_mut().as_mut_ptr() as *mut c_void,
-                bytes.try_into().map_err(|_| ErrorKind::OutOfRange)?,
+                chunk.as_mut_ptr() as *mut c_void,
+                chunk.len().try_into().unwrap_or(i32::MAX),
                 position.try_into().map_err(|_| ErrorKind::OutOfRange)?,
             )
         } {
             libsqlite3_sys::SQLITE_OK => {}
             _ => return Err(self.connection.last_error()),
-        }
-        unsafe {
-            chunk.set_len(chunk.len() + bytes);
         }
         Ok(())
     }
