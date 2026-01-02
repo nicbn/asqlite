@@ -20,7 +20,8 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - run: cargo install cargo-msrv --all-features
-      - run: cargo msrv --output-format json verify -- cargo check
+      - run: cargo install cargo-msrv
+      - run: cargo msrv --version
+      - run: cargo msrv verify --output-format json
       - if: ${{ failure() }}
-        run: cargo msrv --output-format json -- cargo check
+        run: cargo msrv find --output-format json
