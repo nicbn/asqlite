@@ -1,12 +1,19 @@
 use asqlite::params;
 use futures::StreamExt;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+fn db_name() -> String {
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    COUNTER.load(Ordering::Relaxed).to_string()
+}
 
 #[tokio::test]
 async fn query() {
     let mut conn = asqlite::Connection::builder()
         .write(true)
         .create(true)
-        .open_memory(":memory")
+        .open_memory(&db_name())
         .await
         .unwrap();
 
@@ -39,7 +46,7 @@ async fn update() {
     let mut conn = asqlite::Connection::builder()
         .write(true)
         .create(true)
-        .open_memory(":memory")
+        .open_memory(&db_name())
         .await
         .unwrap();
 
@@ -75,7 +82,7 @@ async fn collation() {
     let mut conn = asqlite::Connection::builder()
         .write(true)
         .create(true)
-        .open_memory(":memory")
+        .open_memory(&db_name())
         .await
         .unwrap();
 

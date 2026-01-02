@@ -300,14 +300,13 @@ impl blocking::Connection for Connection {
     fn read_blob(
         &mut self,
         index: blocking::BlobIndex,
-        chunk: &mut Vec<u8>,
+        chunk: &mut [u8],
         position: u64,
-        bytes: usize,
     ) -> Result<()> {
         self.blobs
             .get_mut(index.0)
             .ok_or(ErrorKind::Misuse)?
-            .read(chunk, position, bytes)
+            .read(chunk, position)
     }
 
     fn write_blob(

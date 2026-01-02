@@ -1,20 +1,15 @@
-use crate::{
-    blocking::BlobIndex,
-    worker::{Sender, Work},
-    Error, ErrorKind, Result,
-};
+use crate::{blocking::BlobIndex, worker::Sender, Error, ErrorKind, Result};
 use futures_io::{AsyncBufRead, AsyncRead, AsyncSeek, AsyncWrite};
 use std::{
     ffi::CString,
-    fmt,
-    future::{self, Future},
+    fmt, future,
     io::{self, SeekFrom},
-    mem,
     pin::Pin,
     task::{ready, Context, Poll},
 };
 
-const BUFFER_CAPACITY: usize = 1024;
+mod read;
+mod write;
 
 /// Binary blob.
 ///
@@ -54,42 +49,17 @@ const BUFFER_CAPACITY: usize = 1024;
 pub struct Blob {
     tx_req: Sender,
     index: BlobIndex,
-    operation: Option<BlobOperation>,
 
     len: u64,
 
     offset: u64,
 
-    buf: Vec<u8>,
+    op: Option<Operation>,
 }
 
-/// Operation.
-enum BlobOperation {
-    /// Currently reading from the buffer.
-    ReadingFromBuffer {
-        /// Offset of the read in the buffer.
-        index: usize,
-    },
-
-    /// Currently writing to the buffer.
-    WritingToBuffer {
-        /// Offset of the buffer.
-        offset: u64,
-    },
-
-    /// Currently reading from the database.
-    Reading {
-        /// Offset of the buffer.
-        offset: u64,
-        /// Work.
-        work: Work<(Vec<u8>, Result<()>)>,
-    },
-
-    /// Currently writing to the database.
-    Writing {
-        /// Work.
-        work: Work<(Vec<u8>, Result<()>)>,
-    },
+enum Operation {
+    Read(read::BlobRead),
+    Write(write::BlobWrite),
 }
 
 impl Blob {
@@ -128,13 +98,12 @@ impl Blob {
         Ok(Self {
             tx_req,
             index,
-            operation: None,
 
             len,
 
             offset: 0,
 
-            buf: Vec::with_capacity(BUFFER_CAPACITY),
+            op: None,
         })
     }
 
@@ -155,41 +124,26 @@ impl Blob {
     ///
     /// See also: [`write`](Self::write).
     pub fn poll_write(&mut self, cx: &mut Context, bytes: &[u8]) -> Poll<Result<usize>> {
-        loop {
-            match &mut self.operation {
-                Some(BlobOperation::ReadingFromBuffer { .. })
-                | Some(BlobOperation::Reading { .. })
-                | None => {
-                    self.operation = Some(BlobOperation::WritingToBuffer {
-                        offset: self.offset,
-                    });
-                    self.buf.clear();
-                }
-
-                Some(BlobOperation::WritingToBuffer { offset }) => {
-                    if self.offset >= self.len {
-                        return Poll::Ready(Ok(0));
-                    } else if self.offset + self.buf.len() as u64 == *offset {
-                        let v = bytes
-                            .len()
-                            .min(BUFFER_CAPACITY)
-                            .min((self.len - self.offset).try_into().unwrap_or(usize::MAX));
-                        if v > 0 {
-                            self.buf.extend_from_slice(&bytes[..v]);
-                            self.offset += v as u64;
-                            return Poll::Ready(Ok(v));
-                        } else {
-                            ready!(self.poll_flush(cx))?;
-                        }
-                    } else {
-                        ready!(self.poll_flush(cx))?;
-                    }
-                }
-
-                Some(BlobOperation::Writing { .. }) => {
-                    ready!(self.poll_flush(cx))?;
-                }
+        match &mut self.op {
+            Some(Operation::Write(w)) if self.offset == w.offset() => {}
+            _ => {
+                ready!(self.poll_flush(cx))?;
+                self.op = Some(Operation::Write(write::BlobWrite::new(
+                    &self.tx_req,
+                    self.index,
+                    self.offset,
+                    self.len,
+                )));
             }
+        }
+
+        match &mut self.op {
+            Some(Operation::Write(w)) if self.offset == w.offset() => {
+                let size = ready!(w.poll_write(cx, bytes))?;
+                self.offset += size as u64;
+                Poll::Ready(Ok(size))
+            }
+            _ => unreachable!(),
         }
     }
 
@@ -197,47 +151,9 @@ impl Blob {
     ///
     /// See also: [`flush`](Self::flush).
     pub fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<()>> {
-        loop {
-            match &mut self.operation {
-                Some(BlobOperation::ReadingFromBuffer { .. }) => return Poll::Ready(Ok(())),
-
-                Some(BlobOperation::WritingToBuffer { offset }) => {
-                    if self.buf.is_empty() {
-                        self.operation = None;
-
-                        return Poll::Ready(Ok(()));
-                    }
-
-                    let buf = mem::take(&mut self.buf);
-                    let index = self.index;
-                    let offset = *offset;
-                    self.operation = Some(BlobOperation::Writing {
-                        work: self.tx_req.call(move |c| {
-                            let r = c.write_blob(index, &buf, offset);
-                            Ok((buf, r))
-                        }),
-                    });
-                }
-
-                Some(BlobOperation::Reading { .. }) => return Poll::Ready(Ok(())),
-
-                Some(BlobOperation::Writing { work }) => match ready!(Pin::new(work).poll(cx)) {
-                    Ok((b, v)) => {
-                        self.buf = b;
-
-                        self.operation = None;
-
-                        return Poll::Ready(v);
-                    }
-                    Err(e) => {
-                        self.operation = None;
-
-                        return Poll::Ready(Err(e));
-                    }
-                },
-
-                None => return Poll::Ready(Ok(())),
-            }
+        match &mut self.op {
+            Some(Operation::Write(w)) => w.poll_flush(cx),
+            _ => Poll::Ready(Ok(())),
         }
     }
 
@@ -247,75 +163,29 @@ impl Blob {
     pub fn poll_fill_buf(&mut self, cx: &mut Context) -> Poll<Result<&[u8]>> {
         ready!(self.poll_fill_buf_without_returning_buffer(cx))?;
 
-        if let Some(BlobOperation::ReadingFromBuffer { index, .. }) = &self.operation {
-            Poll::Ready(Ok(&self.buf[*index..]))
-        } else {
-            Poll::Ready(Ok(&[]))
+        match &mut self.op {
+            Some(Operation::Read(r)) if self.offset == r.offset() => Poll::Ready(Ok(r.buf())),
+            _ => unreachable!(),
         }
     }
 
     fn poll_fill_buf_without_returning_buffer(&mut self, cx: &mut Context) -> Poll<Result<()>> {
-        loop {
-            match &mut self.operation {
-                Some(BlobOperation::Writing { .. })
-                | Some(BlobOperation::WritingToBuffer { .. }) => {
-                    ready!(self.poll_flush(cx))?;
-                }
-
-                Some(BlobOperation::ReadingFromBuffer { index }) => {
-                    let index = *index;
-                    if index < self.buf.len() {
-                        return Poll::Ready(Ok(()));
-                    }
-
-                    self.operation = None;
-                }
-
-                Some(BlobOperation::Reading { offset, work }) => {
-                    match ready!(Pin::new(work).poll(cx)) {
-                        Ok((b, Ok(()))) => {
-                            self.buf = b;
-
-                            if *offset != self.offset {
-                                self.operation = None;
-                            } else {
-                                self.operation =
-                                    Some(BlobOperation::ReadingFromBuffer { index: 0 });
-                            }
-                        }
-                        Ok((b, Err(error))) => {
-                            self.buf = b;
-
-                            self.operation = None;
-
-                            return Poll::Ready(Err(error));
-                        }
-                        Err(e) => {
-                            self.operation = None;
-
-                            return Poll::Ready(Err(e));
-                        }
-                    }
-                }
-
-                None if self.offset < self.len => {
-                    let mut buf = mem::take(&mut self.buf);
-                    let index = self.index;
-                    let len = BUFFER_CAPACITY
-                        .min((self.len - self.offset).try_into().unwrap_or(usize::MAX));
-                    let offset = self.offset;
-                    buf.clear();
-                    self.operation = Some(BlobOperation::Reading {
-                        offset: self.offset,
-                        work: self.tx_req.call(move |c| {
-                            let r = c.read_blob(index, &mut buf, offset, len);
-                            Ok((buf, r))
-                        }),
-                    });
-                }
-
-                None => return Poll::Ready(Ok(())),
+        match &mut self.op {
+            Some(Operation::Read(r)) if self.offset == r.offset() => {}
+            _ => {
+                ready!(self.poll_flush(cx))?;
+                self.op = Some(Operation::Read(read::BlobRead::new(
+                    &self.tx_req,
+                    self.index,
+                    self.offset,
+                    self.len,
+                )));
             }
+        }
+
+        match &mut self.op {
+            Some(Operation::Read(r)) if self.offset == r.offset() => r.poll_fill_buf(cx),
+            _ => unreachable!(),
         }
     }
 
@@ -324,22 +194,24 @@ impl Blob {
     /// This function is a lower-level call that should be paired with
     /// [`poll_fill_buf`](Self::poll_fill_buf) to work properly.
     pub fn consume(&mut self, bytes: usize) {
-        if let Some(BlobOperation::ReadingFromBuffer { index }) = &mut self.operation {
-            self.offset += bytes as u64;
-            *index += bytes;
+        match &mut self.op {
+            Some(Operation::Read(r)) if self.offset == r.offset() => r.consume(bytes),
+            _ => {}
         }
+
+        // Advance offset
+
+        self.offset += bytes as u64;
     }
 
     /// Seek to an offset.
     pub fn seek(&mut self, position: SeekFrom) -> Result<u64> {
-        if let Some(BlobOperation::ReadingFromBuffer { .. }) = &self.operation {
-            self.operation = None;
-        }
         match position {
             SeekFrom::Current(v) => self.offset = ((self.offset as i64) + v) as u64,
             SeekFrom::End(v) => self.offset = ((self.len as i64) + v) as u64,
             SeekFrom::Start(v) => self.offset = v,
         }
+
         Ok(self.offset)
     }
 
@@ -374,10 +246,9 @@ impl Blob {
     pub async fn fill_buf(&mut self) -> Result<&[u8]> {
         future::poll_fn(|cx| self.poll_fill_buf_without_returning_buffer(cx)).await?;
 
-        if let Some(BlobOperation::ReadingFromBuffer { index, .. }) = &self.operation {
-            Ok(&self.buf[*index..])
-        } else {
-            Ok(&[])
+        match &mut self.op {
+            Some(Operation::Read(r)) if self.offset == r.offset() => Ok(r.buf()),
+            _ => unreachable!(),
         }
     }
 
@@ -385,7 +256,7 @@ impl Blob {
     pub async fn reopen(&mut self, row: i64) -> Result<()> {
         self.flush().await?;
         let index = self.index;
-        self.operation = None;
+        self.op = None;
         self.tx_req.call(move |c| c.reopen_blob(index, row)).await
     }
 }
@@ -400,15 +271,6 @@ impl fmt::Debug for Blob {
 
 impl Drop for Blob {
     fn drop(&mut self) {
-        if let Some(BlobOperation::WritingToBuffer { offset }) = self.operation.as_ref() {
-            let buf = mem::take(&mut self.buf);
-            let offset = *offset;
-            let index = self.index;
-            self.tx_req.call_without_return_value(move |c| {
-                let _ = c.write_blob(index, &buf, offset);
-            });
-        }
-
         let index = self.index;
         self.tx_req.call_without_return_value(move |c| {
             c.close_blob(index);

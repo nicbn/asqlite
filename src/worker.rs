@@ -140,18 +140,21 @@ where
 {
     let (tx_req, rx_req) = mpsc::unbounded::<RequestMessage>();
 
-    thread::spawn(move || {
-        block_on(Worker {
-            rx_req,
+    thread::Builder::new()
+        .name("asqlite worker".to_string())
+        .spawn(move || {
+            block_on(Worker {
+                rx_req,
 
-            database: Database {
-                connection_factory,
-                connection: None,
-            },
+                database: Database {
+                    connection_factory,
+                    connection: None,
+                },
 
-            futures: Vec::new(),
+                futures: Vec::new(),
+            })
         })
-    });
+        .expect("failed to spawn thread");
 
     Sender { tx: tx_req }
 }

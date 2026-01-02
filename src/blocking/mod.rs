@@ -62,13 +62,7 @@ pub(crate) trait Connection: Unpin {
 
     fn blob_size(&mut self, index: BlobIndex) -> Result<u64>;
 
-    fn read_blob(
-        &mut self,
-        index: BlobIndex,
-        chunk: &mut Vec<u8>,
-        position: u64,
-        bytes: usize,
-    ) -> Result<()>;
+    fn read_blob(&mut self, index: BlobIndex, chunk: &mut [u8], position: u64) -> Result<()>;
 
     fn write_blob(&mut self, index: BlobIndex, chunk: &[u8], position: u64) -> Result<()>;
 

@@ -64,5 +64,5 @@ async fn run(size: u64) {
 async fn main() {
     run(1 << 20).await;
     run(16 << 20).await;
-    // run(128 << 20).await; // FIXME: reading is too slow
+    run(128 << 20).await;
 }
